@@ -25,12 +25,18 @@ node server.js
 - `DEFAULT_PROVIDER=deepseek`
 - `DEFAULT_API_BASE_URL=https://api.deepseek.com/v1`
 
-增强数据（可选，建议你接自己的聚合服务）：
+增强数据（可选）：
 
-- `FINANCE_API_BASE_URL`：提供 `GET /enrich?ticker=...`
-- `FINANCE_API_KEY`：可选鉴权
-- `NEWS_API_BASE_URL`：提供 `GET /news?q=...&limit=8`
-- `NEWS_API_KEY`：可选鉴权
+- 默认不配置也可运行：服务端会尝试直接抓取公开源（东方财富周线/资金 + Google News RSS）
+- 若你有更稳定私有数据服务，可覆盖：
+  - `FINANCE_API_BASE_URL`：提供 `GET /enrich?ticker=...`
+  - `FINANCE_API_KEY`：可选鉴权
+  - `NEWS_API_BASE_URL`：提供 `GET /news?q=...&limit=8`
+  - `NEWS_API_KEY`：可选鉴权
+刷新策略：
+
+- 每次加载新中心公司图谱，都会请求一次最新增强数据（不定时轮询）
+- 若命中图谱缓存，也会额外拉取一轮最新增强数据覆盖缓存
 
 ## 增强数据接口约定
 

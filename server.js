@@ -222,8 +222,78 @@ function normalizeTicker(code) {
   return raw;
 }
 
+function guessSecid(ticker) {
+  if (!/^\d{6}$/.test(ticker)) return "";
+  const first = ticker[0];
+  if (first === "6" || first === "9") return `1.${ticker}`;
+  return `0.${ticker}`;
+}
+
+function startOfWeekMonday(d = new Date()) {
+  const dt = new Date(d);
+  const day = dt.getDay() || 7;
+  dt.setHours(0, 0, 0, 0);
+  dt.setDate(dt.getDate() - day + 1);
+  return dt;
+}
+
+function parseDateYmd(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || "").trim());
+  if (!m) return null;
+  return new Date(`${m[1]}-${m[2]}-${m[3]}T00:00:00`);
+}
+
+async function fetchEastmoneyWeeklyAndFund(ticker) {
+  const secid = guessSecid(ticker);
+  if (!secid) return null;
+  const klineUrl =
+    `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${encodeURIComponent(secid)}` +
+    "&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt=102&fqt=1";
+  const fundUrl =
+    `https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?secid=${encodeURIComponent(secid)}` +
+    "&lmt=30&klt=101&fields1=f1,f2,f3,f7&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65";
+
+  const [klineData, fundData] = await Promise.all([
+    fetchJsonWithTimeout(klineUrl, {}, 12000).catch(() => null),
+    fetchJsonWithTimeout(fundUrl, {}, 12000).catch(() => null)
+  ]);
+
+  const weekly = Array.isArray(klineData?.data?.klines) ? klineData.data.klines : [];
+  const fund = Array.isArray(fundData?.data?.klines) ? fundData.data.klines : [];
+
+  let weeklyReturnPct = null;
+  let dataWeek = "last_week";
+  if (weekly.length >= 2) {
+    const last = String(weekly[weekly.length - 1]).split(",");
+    const prev = String(weekly[weekly.length - 2]).split(",");
+    const lastClose = Number(last[2]);
+    const prevClose = Number(prev[2]);
+    if (Number.isFinite(lastClose) && Number.isFinite(prevClose) && prevClose !== 0) {
+      weeklyReturnPct = ((lastClose - prevClose) / prevClose) * 100;
+    }
+    const lastDate = parseDateYmd(last[0]);
+    if (lastDate && lastDate >= startOfWeekMonday()) dataWeek = "this_week";
+  }
+
+  let mainFundNetInflow = null;
+  if (fund.length >= 1) {
+    const row = String(fund[fund.length - 1]).split(",");
+    const v = Number(row[1]);
+    if (Number.isFinite(v)) mainFundNetInflow = v;
+  }
+
+  return {
+    weeklyReturnPct,
+    mainFundNetInflow,
+    dataWeek,
+    color: weekReturnColor(weeklyReturnPct),
+    weeklyReturnText:
+      weeklyReturnPct == null ? "-" : `${weeklyReturnPct >= 0 ? "+" : ""}${weeklyReturnPct.toFixed(2)}%`,
+    mainFundText: formatMoneyCN(mainFundNetInflow)
+  };
+}
+
 async function fetchWeeklyAndFundData(nodes) {
-  if (!FINANCE_API_BASE_URL) return {};
   const out = {};
   const unique = new Set();
   for (const n of nodes || []) {
@@ -233,26 +303,30 @@ async function fetchWeeklyAndFundData(nodes) {
 
   for (const ticker of unique) {
     try {
-      const url = joinUrl(FINANCE_API_BASE_URL, `/enrich?ticker=${encodeURIComponent(ticker)}`);
-      const data = await fetchJsonWithTimeout(
-        url,
-        {
-          headers: FINANCE_API_KEY ? { Authorization: `Bearer ${FINANCE_API_KEY}` } : {}
-        },
-        10000
-      );
-      const weeklyReturnPct = Number.isFinite(data?.weeklyReturnPct) ? data.weeklyReturnPct : null;
-      const mainFundNetInflow = Number.isFinite(data?.mainFundNetInflow) ? data.mainFundNetInflow : null;
-      const dataWeek = data?.dataWeek === "last_week" ? "last_week" : "this_week";
-      out[ticker] = {
-        weeklyReturnPct,
-        mainFundNetInflow,
-        dataWeek,
-        color: weekReturnColor(weeklyReturnPct),
-        weeklyReturnText:
-          weeklyReturnPct == null ? "-" : `${weeklyReturnPct >= 0 ? "+" : ""}${weeklyReturnPct.toFixed(2)}%`,
-        mainFundText: formatMoneyCN(mainFundNetInflow)
-      };
+      if (FINANCE_API_BASE_URL) {
+        const url = joinUrl(FINANCE_API_BASE_URL, `/enrich?ticker=${encodeURIComponent(ticker)}`);
+        const data = await fetchJsonWithTimeout(
+          url,
+          {
+            headers: FINANCE_API_KEY ? { Authorization: `Bearer ${FINANCE_API_KEY}` } : {}
+          },
+          10000
+        );
+        const weeklyReturnPct = Number.isFinite(data?.weeklyReturnPct) ? data.weeklyReturnPct : null;
+        const mainFundNetInflow = Number.isFinite(data?.mainFundNetInflow) ? data.mainFundNetInflow : null;
+        const dataWeek = data?.dataWeek === "last_week" ? "last_week" : "this_week";
+        out[ticker] = {
+          weeklyReturnPct,
+          mainFundNetInflow,
+          dataWeek,
+          color: weekReturnColor(weeklyReturnPct),
+          weeklyReturnText:
+            weeklyReturnPct == null ? "-" : `${weeklyReturnPct >= 0 ? "+" : ""}${weeklyReturnPct.toFixed(2)}%`,
+          mainFundText: formatMoneyCN(mainFundNetInflow)
+        };
+      } else {
+        out[ticker] = await fetchEastmoneyWeeklyAndFund(ticker);
+      }
     } catch {
       out[ticker] = null;
     }
@@ -272,7 +346,28 @@ function fallbackNews(centerEntity) {
 }
 
 async function fetchNews(centerEntity) {
-  if (!NEWS_API_BASE_URL) return fallbackNews(centerEntity);
+  if (!NEWS_API_BASE_URL) {
+    const query = encodeURIComponent(`${centerEntity} 股票`);
+    const rssUrl = `https://news.google.com/rss/search?q=${query}&hl=zh-CN&gl=CN&ceid=CN:zh-Hans`;
+    try {
+      const resp = await fetch(rssUrl);
+      if (!resp.ok) return fallbackNews(centerEntity);
+      const xml = await resp.text();
+      const items = [];
+      const blocks = xml.match(/<item[\s\S]*?<\/item>/g) || [];
+      for (const block of blocks.slice(0, 8)) {
+        const title = (block.match(/<title><!\[CDATA\[([\s\S]*?)\]\]><\/title>/)?.[1] || block.match(/<title>([\s\S]*?)<\/title>/)?.[1] || "").trim();
+        const link = (block.match(/<link>([\s\S]*?)<\/link>/)?.[1] || "").trim();
+        const pubDate = (block.match(/<pubDate>([\s\S]*?)<\/pubDate>/)?.[1] || "").trim();
+        const source = (block.match(/<source[^>]*>([\s\S]*?)<\/source>/)?.[1] || "Google News").trim();
+        if (!title) continue;
+        items.push({ title, url: link, source, publishedAt: pubDate });
+      }
+      return items.length ? items : fallbackNews(centerEntity);
+    } catch {
+      return fallbackNews(centerEntity);
+    }
+  }
   try {
     const url = joinUrl(NEWS_API_BASE_URL, `/news?q=${encodeURIComponent(centerEntity)}&limit=8`);
     const data = await fetchJsonWithTimeout(

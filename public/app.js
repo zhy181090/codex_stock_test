@@ -437,6 +437,11 @@ async function showCenterGraph(centerEntity, options = {}) {
       setStatus(`已获取 ${center} 最新深层图谱。`);
     } else {
       setStatus(`已使用缓存：${center}。`);
+      const enrichFresh = await requestEnrich(center, payload.graph?.nodes || []).catch(() => null);
+      if (enrichFresh) {
+        payload.enrich = enrichFresh;
+        setCachedPayload(center, payload);
+      }
     }
 
     setGraph(center, payload.graph, payload.enrich?.nodeMetrics || {});
