@@ -259,6 +259,7 @@ button:disabled {
 .node-metric {
   font-size: 9px;
   pointer-events: none;
+  text-anchor: middle;
 }
 
 .metric-up {

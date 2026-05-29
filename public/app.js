@@ -434,8 +434,8 @@ function render() {
         "class",
         `node-metric ${String(metric.weeklyReturnText || "").startsWith("-") ? "metric-down" : "metric-up"}`
       );
-      l1.setAttribute("x", "26");
-      l1.setAttribute("y", "-5");
+      l1.setAttribute("x", "0");
+      l1.setAttribute("y", "-28");
       l1.textContent = `周涨跌: ${metric.weeklyReturnText || "-"}`;
       g.appendChild(l1);
 
@@ -444,8 +444,8 @@ function render() {
         "class",
         `node-metric ${Number(metric.mainFundNetInflow || 0) < 0 ? "metric-outflow" : "metric-inflow"}`
       );
-      l2.setAttribute("x", "26");
-      l2.setAttribute("y", "10");
+      l2.setAttribute("x", "0");
+      l2.setAttribute("y", "-16");
       l2.textContent = `主力净流入: ${metric.mainFundText || "-"}`;
       g.appendChild(l2);
     }
