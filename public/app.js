@@ -182,86 +182,80 @@ function setGraph(centerEntity, graph, metrics) {
   }
 }
 
-function buildLayers(centerId) {
-  const incoming = new Map();
-  for (const n of state.nodes.keys()) incoming.set(n, []);
-  for (const e of state.edges) {
-    if (!incoming.has(e.target)) incoming.set(e.target, []);
-    incoming.get(e.target).push(e.source);
+function hashNumber(text) {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i += 1) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
   }
+  return (h >>> 0) / 4294967295;
+}
 
-  const depthMap = new Map([[centerId, 0]]);
-  const q = [centerId];
-  while (q.length) {
-    const cur = q.shift();
-    const d = depthMap.get(cur) || 0;
-    const parents = incoming.get(cur) || [];
-    for (const p of parents) {
-      if (!depthMap.has(p)) {
-        depthMap.set(p, d + 1);
-        q.push(p);
-      }
+function forceLayout(iterations = 170) {
+  const nodes = [...state.nodes.values()];
+  if (!nodes.length) return;
+
+  const width = 1600;
+  const height = 980;
+  const area = width * height;
+  const k = Math.sqrt(area / Math.max(1, nodes.length));
+
+  for (const node of nodes) {
+    if (!state.positions.has(node.id)) {
+      const rx = hashNumber(`${state.currentCenter}:${node.id}:x`);
+      const ry = hashNumber(`${state.currentCenter}:${node.id}:y`);
+      state.positions.set(node.id, { x: 120 + rx * 1360, y: 90 + ry * 800 });
     }
   }
 
-  for (const id of state.nodes.keys()) {
-    if (!depthMap.has(id)) depthMap.set(id, 1);
-  }
+  for (let step = 0; step < iterations; step += 1) {
+    const disp = new Map(nodes.map((n) => [n.id, { x: 0, y: 0 }]));
 
-  const layers = new Map();
-  for (const [id, d] of depthMap.entries()) {
-    if (!layers.has(d)) layers.set(d, []);
-    layers.get(d).push(id);
-  }
-  return { depthMap, layers };
-}
+    for (let i = 0; i < nodes.length; i += 1) {
+      for (let j = i + 1; j < nodes.length; j += 1) {
+        const a = nodes[i];
+        const b = nodes[j];
+        const pa = state.positions.get(a.id);
+        const pb = state.positions.get(b.id);
+        let dx = pa.x - pb.x;
+        let dy = pa.y - pb.y;
+        let dist = Math.hypot(dx, dy) || 0.01;
+        const rep = (k * k) / dist;
+        dx /= dist;
+        dy /= dist;
+        disp.get(a.id).x += dx * rep;
+        disp.get(a.id).y += dy * rep;
+        disp.get(b.id).x -= dx * rep;
+        disp.get(b.id).y -= dy * rep;
+      }
+    }
 
-function layeredLayout() {
-  const width = 1600;
-  const height = 980;
-  const centerId = state.currentCenter;
-  const { depthMap, layers } = buildLayers(centerId);
-  const maxDepth = Math.max(...layers.keys());
-  const xStep = maxDepth > 0 ? (width - 220) / maxDepth : width / 2;
+    for (const edge of state.edges) {
+      const pa = state.positions.get(edge.source);
+      const pb = state.positions.get(edge.target);
+      if (!pa || !pb) continue;
+      let dx = pa.x - pb.x;
+      let dy = pa.y - pb.y;
+      let dist = Math.hypot(dx, dy) || 0.01;
+      const attr = (dist * dist) / k;
+      dx /= dist;
+      dy /= dist;
+      disp.get(edge.source).x -= dx * attr;
+      disp.get(edge.source).y -= dy * attr;
+      disp.get(edge.target).x += dx * attr;
+      disp.get(edge.target).y += dy * attr;
+    }
 
-  for (const [depth, ids] of layers.entries()) {
-    ids.sort((a, b) => {
-      const da = state.edges.filter((e) => e.source === a).length;
-      const db = state.edges.filter((e) => e.source === b).length;
-      if (da !== db) return db - da;
-      return a.localeCompare(b);
-    });
-
-    const laneCount = ids.length;
-    const yGap = laneCount <= 1 ? 0 : (height - 140) / (laneCount - 1);
-    ids.forEach((id, idx) => {
-      const x = 90 + depth * xStep;
-      const y = laneCount <= 1 ? height / 2 : 70 + idx * yGap;
-      state.positions.set(id, { x, y });
-    });
-  }
-
-  if (state.positions.has(centerId)) {
-    const p = state.positions.get(centerId);
-    state.positions.set(centerId, { x: 90, y: p.y });
-  }
-
-  for (const depth of [...layers.keys()]) {
-    if (depth === 0 || !layers.has(depth - 1)) continue;
-    const ids = layers.get(depth);
-    ids.sort((a, b) => {
-      const ta = state.edges.find((e) => e.source === a)?.target || "";
-      const tb = state.edges.find((e) => e.source === b)?.target || "";
-      const ya = state.positions.get(ta)?.y || 0;
-      const yb = state.positions.get(tb)?.y || 0;
-      return ya - yb;
-    });
-    const laneCount = ids.length;
-    const yGap = laneCount <= 1 ? 0 : (height - 140) / (laneCount - 1);
-    ids.forEach((id, idx) => {
-      const pos = state.positions.get(id);
-      state.positions.set(id, { x: pos.x, y: laneCount <= 1 ? height / 2 : 70 + idx * yGap });
-    });
+    const temp = Math.max(1, 42 * (1 - step / iterations));
+    for (const n of nodes) {
+      const p = state.positions.get(n.id);
+      const d = disp.get(n.id);
+      const dist = Math.hypot(d.x, d.y) || 0.01;
+      p.x += (d.x / dist) * Math.min(dist, temp);
+      p.y += (d.y / dist) * Math.min(dist, temp);
+      p.x = Math.min(width - 60, Math.max(60, p.x));
+      p.y = Math.min(height - 60, Math.max(60, p.y));
+    }
   }
 }
 
@@ -456,7 +450,7 @@ async function showCenterGraph(centerEntity, options = {}) {
     }
 
     setGraph(center, payload.graph, payload.enrich?.nodeMetrics || {});
-    layeredLayout();
+    forceLayout(180);
     if (resetView) resetViewport();
     render();
     renderNews(payload.enrich?.news || [], payload.enrich?.commentary || "");
