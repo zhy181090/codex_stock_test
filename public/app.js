@@ -39,7 +39,14 @@ const ui = {
   overlays: document.getElementById("overlays"),
   newsList: document.getElementById("newsList"),
   newsTag: document.getElementById("newsTag"),
-  newsCommentary: document.getElementById("newsCommentary")
+  newsCommentary: document.getElementById("newsCommentary"),
+  halfYearReason: document.getElementById("halfYearReason"),
+  scoreRoute: document.getElementById("scoreRoute"),
+  scoreOligopoly: document.getElementById("scoreOligopoly"),
+  scoreMismatch: document.getElementById("scoreMismatch"),
+  scoreTotal: document.getElementById("scoreTotal"),
+  scoreBrief: document.getElementById("scoreBrief"),
+  forecastText: document.getElementById("forecastText")
 };
 
 function setStatus(text, isError = false) {
@@ -320,6 +327,17 @@ function renderNews(news, commentary) {
   ui.newsTag.textContent = `共 ${news?.length || 0} 条`;
 }
 
+function renderThesis(thesis) {
+  const t = thesis || {};
+  ui.halfYearReason.textContent = t.halfYearReason || "暂无半年涨跌原因分析";
+  ui.scoreRoute.textContent = Number.isFinite(t?.score?.route) ? `${t.score.route}` : "-";
+  ui.scoreOligopoly.textContent = Number.isFinite(t?.score?.oligopoly) ? `${t.score.oligopoly}` : "-";
+  ui.scoreMismatch.textContent = Number.isFinite(t?.score?.mismatch) ? `${t.score.mismatch}` : "-";
+  ui.scoreTotal.textContent = Number.isFinite(t?.score?.total) ? `${t.score.total}` : "-";
+  ui.scoreBrief.textContent = t?.score?.brief || "暂无评分说明";
+  ui.forecastText.textContent = t?.forecast || "暂无未来预测";
+}
+
 function render() {
   clearGroup(ui.edges);
   clearGroup(ui.edgeLabels);
@@ -525,7 +543,8 @@ async function requestEnrich(centerEntity, nodes) {
       apiBaseUrl: ui.apiBaseUrl.value.trim(),
       apiKey: ui.apiKey.value.trim(),
       centerEntity,
-      nodes
+      nodes,
+      edges: state.edges
     })
   });
   const data = await resp.json();
@@ -568,6 +587,7 @@ async function showCenterGraph(centerEntity, options = {}) {
     if (resetView) resetViewport();
     render();
     renderNews(payload.enrich?.news || [], payload.enrich?.commentary || "");
+    renderThesis(payload.enrich?.thesis || null);
     ui.centerEntity.value = center;
     setStatus(`当前中心：${center}。同一股票跨端布局保持一致。`);
   } catch (err) {
@@ -614,6 +634,13 @@ function clearCanvas() {
   resetViewport();
   ui.newsCommentary.textContent = "暂无解读";
   ui.newsTag.textContent = "未加载";
+  ui.halfYearReason.textContent = "暂无分析";
+  ui.scoreRoute.textContent = "-";
+  ui.scoreOligopoly.textContent = "-";
+  ui.scoreMismatch.textContent = "-";
+  ui.scoreTotal.textContent = "-";
+  ui.scoreBrief.textContent = "暂无评分解读";
+  ui.forecastText.textContent = "暂无未来预测";
   while (ui.newsList.firstChild) ui.newsList.removeChild(ui.newsList.firstChild);
   setStatus("已清空画布。");
 }

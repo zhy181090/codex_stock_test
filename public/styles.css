@@ -296,6 +296,41 @@ button:disabled {
   background: rgba(14, 21, 37, 0.92);
 }
 
+.analysis-block {
+  margin-bottom: 12px;
+}
+
+.analysis-block h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.score-board {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.score-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(28, 44, 74, 0.72);
+  font-size: 12px;
+}
+
+.score-item b {
+  font-size: 16px;
+  color: #ffd666;
+}
+
+.score-item.total {
+  background: rgba(48, 66, 102, 0.9);
+}
+
 .news-header {
   display: flex;
   justify-content: space-between;

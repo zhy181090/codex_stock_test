@@ -315,6 +315,59 @@ async function fetchTickerEnrich(ticker) {
   return null;
 }
 
+async function fetchHalfYearAshare(ticker) {
+  const secid = guessSecid(ticker);
+  if (!secid) return null;
+  const url =
+    `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${encodeURIComponent(secid)}` +
+    "&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt=101&fqt=1&lmt=140";
+  const data = await fetchJsonWithTimeout(url, {}, 10000).catch(() => null);
+  const klines = Array.isArray(data?.data?.klines) ? data.data.klines : [];
+  if (klines.length < 50) return null;
+  const start = String(klines[Math.max(0, klines.length - 120)]).split(",");
+  const end = String(klines[klines.length - 1]).split(",");
+  const startClose = Number(start[2]);
+  const endClose = Number(end[2]);
+  if (!Number.isFinite(startClose) || !Number.isFinite(endClose) || startClose === 0) return null;
+  return {
+    source: "eastmoney",
+    startDate: start[0],
+    endDate: end[0],
+    returnPct: ((endClose - startClose) / startClose) * 100
+  };
+}
+
+async function fetchHalfYearYahoo(ticker) {
+  const symbol = normalizeTicker(ticker);
+  if (!symbol || /^\d{6}$/.test(symbol)) return null;
+  const url =
+    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}` +
+    "?interval=1d&range=6mo&includePrePost=false&events=div%2Csplits";
+  const data = await fetchJsonWithTimeout(url, {}, 10000).catch(() => null);
+  const r = data?.chart?.result?.[0];
+  const closes = Array.isArray(r?.indicators?.quote?.[0]?.close) ? r.indicators.quote[0].close : [];
+  const ts = Array.isArray(r?.timestamp) ? r.timestamp : [];
+  const valid = closes.map((c, i) => ({ c, t: ts[i] })).filter((x) => Number.isFinite(x.c) && Number.isFinite(x.t));
+  if (valid.length < 30) return null;
+  const first = valid[0];
+  const last = valid[valid.length - 1];
+  return {
+    source: "yahoo",
+    startDate: new Date(first.t * 1000).toISOString().slice(0, 10),
+    endDate: new Date(last.t * 1000).toISOString().slice(0, 10),
+    returnPct: ((last.c - first.c) / first.c) * 100
+  };
+}
+
+async function fetchHalfYearReturn(ticker) {
+  const tk = normalizeTicker(ticker);
+  if (!tk) return null;
+  if (/^\d{6}$/.test(tk)) {
+    return await fetchHalfYearAshare(tk);
+  }
+  return await fetchHalfYearYahoo(tk);
+}
+
 async function fetchWeeklyAndFundData(nodes) {
   const out = {};
   const tickers = [...new Set((nodes || []).map((n) => normalizeTicker(n.ticker)).filter(Boolean))];
@@ -326,6 +379,17 @@ async function fetchWeeklyAndFundData(nodes) {
     }
   }
   return out;
+}
+
+function resolveCenterTicker(centerEntity, nodes) {
+  const c = String(centerEntity || "").trim().toLowerCase();
+  const arr = Array.isArray(nodes) ? nodes : [];
+  const t1 = arr.find((n) => String(n.type || "").toLowerCase() === "target" && n.ticker);
+  if (t1?.ticker) return normalizeTicker(t1.ticker);
+  const t2 = arr.find((n) => (String(n.label || "").toLowerCase() === c || String(n.id || "").toLowerCase() === c) && n.ticker);
+  if (t2?.ticker) return normalizeTicker(t2.ticker);
+  const t3 = arr.find((n) => n.ticker);
+  return t3?.ticker ? normalizeTicker(t3.ticker) : "";
 }
 
 function fallbackNews(centerEntity) {
@@ -377,8 +441,97 @@ async function summarizeNewsWithAI({ modelName, apiKey, apiBaseUrl, centerEntity
   return String(parsed?.summary || "").trim() || "暂无解读。";
 }
 
-async function buildEnrichPayload({ modelName, apiKey, apiBaseUrl, centerEntity, nodes }) {
+async function buildHalfYearAndScoreAnalysis({
+  modelName,
+  apiKey,
+  apiBaseUrl,
+  centerEntity,
+  centerTicker,
+  halfYearInfo,
+  edges
+}) {
+  const cfg = getModelConfig(modelName, apiKey, apiBaseUrl);
+  const edgeFacts = (edges || [])
+    .slice(0, 24)
+    .map((e) => `(${e.source} -> ${e.target}) ${e.relationCn || ""} ${e.summary || ""}`)
+    .join("\n");
+  const perf = halfYearInfo
+    ? `${halfYearInfo.startDate} 到 ${halfYearInfo.endDate}，半年涨跌 ${halfYearInfo.returnPct >= 0 ? "+" : ""}${halfYearInfo.returnPct.toFixed(2)}%，数据源 ${halfYearInfo.source}`
+    : "半年涨跌数据暂不可得";
+
+  const systemPrompt = [
+    "你是产业链投研分析助手。",
+    "返回严格 JSON，不要额外文本。",
+    "格式：",
+    "{",
+    '  "halfYearReason":"...",',
+    '  "score":{"route":0,"oligopoly":0,"mismatch":0,"total":0,"brief":"..."},',
+    '  "forecast":"..."',
+    "}",
+    "规则：",
+    "1) halfYearReason: 120~220字，解释最近半年涨跌原因，可引用产业链魔幻但真实驱动。",
+    "2) 三项评分均 0~10，总分0~30。",
+    "3) route 对应“未来技术路线绕不开程度”；oligopoly 对应“全球少数公司可做程度”；mismatch 对应“市值与卡位市场规模错配程度”。",
+    "4) forecast: 80~160字，总结公司发展与股价潜在方向，禁止投资建议语气。"
+  ].join("\n");
+
+  const userPrompt = [
+    `公司: ${centerEntity}`,
+    `代码: ${centerTicker || "未知"}`,
+    `半年表现: ${perf}`,
+    "图谱事实:",
+    edgeFacts || "暂无"
+  ].join("\n");
+
+  const parsed = await deepseekChatJSON(cfg, systemPrompt, userPrompt, 0.25).catch(() => null);
+  if (parsed && parsed.score) {
+    const route = Math.max(0, Math.min(10, Number(parsed.score.route) || 0));
+    const oligopoly = Math.max(0, Math.min(10, Number(parsed.score.oligopoly) || 0));
+    const mismatch = Math.max(0, Math.min(10, Number(parsed.score.mismatch) || 0));
+    const total = Math.max(0, Math.min(30, Number(parsed.score.total) || route + oligopoly + mismatch));
+    return {
+      halfYearReason: String(parsed.halfYearReason || "").trim(),
+      score: {
+        route,
+        oligopoly,
+        mismatch,
+        total,
+        brief: String(parsed.score.brief || "").trim()
+      },
+      forecast: String(parsed.forecast || "").trim()
+    };
+  }
+
+  const ret = Number.isFinite(halfYearInfo?.returnPct) ? halfYearInfo.returnPct : 0;
+  const route = 6;
+  const oligopoly = 6;
+  const mismatch = ret > 25 ? 4 : 6;
+  return {
+    halfYearReason: `最近半年价格变化与产业链景气、订单预期和估值切换共同驱动。若处于高景气赛道，上游卡位环节更容易获得估值溢价；反之则回撤。`,
+    score: {
+      route,
+      oligopoly,
+      mismatch,
+      total: route + oligopoly + mismatch,
+      brief: "自动回退评分（模型解读暂不可用）"
+    },
+    forecast: "后续更应关注技术路线兑现、产能约束与估值匹配度的再平衡。"
+  };
+}
+
+async function buildEnrichPayload({ modelName, apiKey, apiBaseUrl, centerEntity, nodes, edges }) {
   const [nodeMetrics, news] = await Promise.all([fetchWeeklyAndFundData(nodes), fetchNews(centerEntity)]);
+  const centerTicker = resolveCenterTicker(centerEntity, nodes);
+  const halfYearInfo = centerTicker ? await fetchHalfYearReturn(centerTicker).catch(() => null) : null;
+  const thesis = await buildHalfYearAndScoreAnalysis({
+    modelName,
+    apiKey,
+    apiBaseUrl,
+    centerEntity,
+    centerTicker,
+    halfYearInfo,
+    edges
+  });
   const commentary = await summarizeNewsWithAI({
     modelName,
     apiKey,
@@ -386,7 +539,18 @@ async function buildEnrichPayload({ modelName, apiKey, apiBaseUrl, centerEntity,
     centerEntity,
     newsItems: news
   }).catch(() => "新闻解读暂不可用。");
-  return { nodeMetrics, news, commentary };
+  return {
+    nodeMetrics,
+    news,
+    commentary,
+    thesis: {
+      centerTicker,
+      halfYearInfo,
+      halfYearReason: thesis.halfYearReason,
+      score: thesis.score,
+      forecast: thesis.forecast
+    }
+  };
 }
 
 function serveStatic(pathname, res) {
@@ -448,12 +612,14 @@ const server = http.createServer(async (req, res) => {
       const centerEntity = String(body.centerEntity || "").trim();
       if (!centerEntity) return sendJson(res, 400, { error: "centerEntity is required" });
       const nodes = Array.isArray(body.nodes) ? body.nodes : [];
+      const edges = Array.isArray(body.edges) ? body.edges : [];
       const payload = await buildEnrichPayload({
         modelName: body.modelName,
         apiKey: body.apiKey,
         apiBaseUrl: body.apiBaseUrl,
         centerEntity,
-        nodes
+        nodes,
+        edges
       });
       sendJson(res, 200, payload);
     } catch (err) {
