@@ -36,6 +36,7 @@ const ui = {
   edges: document.getElementById("edges"),
   edgeLabels: document.getElementById("edgeLabels"),
   nodes: document.getElementById("nodes"),
+  overlays: document.getElementById("overlays"),
   newsList: document.getElementById("newsList"),
   newsTag: document.getElementById("newsTag"),
   newsCommentary: document.getElementById("newsCommentary")
@@ -323,6 +324,7 @@ function render() {
   clearGroup(ui.edges);
   clearGroup(ui.edgeLabels);
   clearGroup(ui.nodes);
+  clearGroup(ui.overlays);
 
   state.edges.forEach((e, i) => {
     const sp = state.positions.get(e.source);
@@ -401,7 +403,7 @@ function render() {
       rect.setAttribute("ry", "8");
       rect.setAttribute("width", boxW);
       rect.setAttribute("height", boxH);
-      ui.edgeLabels.appendChild(rect);
+      ui.overlays.appendChild(rect);
 
       lines.forEach((line, idx) => {
         const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
@@ -409,7 +411,7 @@ function render() {
         t.setAttribute("x", bx + 10);
         t.setAttribute("y", by + 20 + idx * 16);
         t.textContent = line;
-        ui.edgeLabels.appendChild(t);
+        ui.overlays.appendChild(t);
       });
     }
   });
