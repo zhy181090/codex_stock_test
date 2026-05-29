@@ -140,14 +140,14 @@ button:disabled {
 .edge {
   stroke: var(--edge);
   stroke-width: 1.2;
-  opacity: 0.86;
+  opacity: 0.78;
 }
 
 .edge-label {
-  fill: #9ec3ff;
-  font-size: 11px;
+  fill: #cae0ff;
+  font-size: 10px;
   pointer-events: none;
-  text-shadow: 0 0 6px rgba(8, 15, 30, 0.95);
+  text-shadow: 0 0 5px rgba(8, 15, 30, 0.95);
 }
 
 .node circle {
@@ -176,7 +176,7 @@ button:disabled {
 }
 
 .node-metric {
-  font-size: 10px;
+  font-size: 9px;
   pointer-events: none;
 }
 
@@ -279,6 +279,6 @@ button:disabled {
   }
 
   .node-metric {
-    font-size: 11px;
+    font-size: 10px;
   }
 }

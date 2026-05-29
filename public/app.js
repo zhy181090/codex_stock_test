@@ -1,8 +1,9 @@
-const CACHE_KEY = "stock_graph_cache_v2";
+const CACHE_KEY = "stock_graph_cache_v3";
 const CONFIG_KEY = "stock_graph_config";
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 30;
 const TOUCH_PAN_GAIN = 1.35;
+const MOUSE_PAN_GAIN = 1.0;
 
 const state = {
   nodes: new Map(),
@@ -30,7 +31,6 @@ const ui = {
   clearBtn: document.getElementById("clearBtn"),
   status: document.getElementById("status"),
   svg: document.getElementById("graphSvg"),
-  defs: document.getElementById("lineDefs"),
   viewport: document.getElementById("viewport"),
   edges: document.getElementById("edges"),
   edgeLabels: document.getElementById("edgeLabels"),
@@ -58,12 +58,14 @@ function getSavedConfig() {
 }
 
 function saveConfig() {
-  const cfg = {
-    modelName: ui.modelName.value,
-    apiBaseUrl: ui.apiBaseUrl.value.trim(),
-    apiKey: ui.apiKey.value.trim()
-  };
-  localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg));
+  localStorage.setItem(
+    CONFIG_KEY,
+    JSON.stringify({
+      modelName: ui.modelName.value,
+      apiBaseUrl: ui.apiBaseUrl.value.trim(),
+      apiKey: ui.apiKey.value.trim()
+    })
+  );
 }
 
 function loadConfigToForm(serverCfg) {
@@ -93,8 +95,8 @@ function loadCache() {
   try {
     const raw = JSON.parse(localStorage.getItem(CACHE_KEY) || "[]");
     const now = Date.now();
-    const valid = raw.filter((item) => item && item.key && item.ts && now - item.ts < CACHE_TTL_MS);
-    state.cache = new Map(valid.map((item) => [item.key, item]));
+    const valid = raw.filter((x) => x && x.key && x.ts && now - x.ts < CACHE_TTL_MS);
+    state.cache = new Map(valid.map((x) => [x.key, x]));
     persistCache();
   } catch {
     state.cache = new Map();
@@ -153,107 +155,120 @@ function setGraph(centerEntity, graph, metrics) {
   for (const node of graph.nodes || []) {
     const id = toId(node.id);
     if (!id) continue;
-    const normalized = {
+    state.nodes.set(id, {
       id,
       label: node.label || id,
       type: node.type || "company",
-      ticker: node.ticker || "",
+      ticker: (node.ticker || "").toUpperCase(),
       market: node.market || ""
-    };
-    state.nodes.set(id, normalized);
-    if (!state.positions.has(id)) {
-      state.positions.set(id, { x: Math.random() * 1320 + 120, y: Math.random() * 760 + 100 });
-    }
+    });
   }
 
   const edgeSet = new Set();
   for (const edge of graph.edges || []) {
     const source = toId(edge.source);
     const target = toId(edge.target);
-    if (!source || !target) continue;
-    const key = `${source}|${target}|${edge.relation || "related"}|${edge.summary || ""}|${edge.depth || ""}`;
+    if (!source || !target || !state.nodes.has(source) || !state.nodes.has(target)) continue;
+    const key = `${source}|${target}|${edge.relation || ""}|${edge.summary || ""}|${edge.depth || ""}`;
     if (edgeSet.has(key)) continue;
     edgeSet.add(key);
     state.edges.push({
       source,
       target,
-      relation: edge.relation || "upstream_dependency",
       relationCn: edge.relationCn || "深层关联",
       summary: edge.summary || "",
-      depth: Number.isFinite(edge.depth) ? edge.depth : null,
-      confidence: typeof edge.confidence === "number" ? edge.confidence : null
+      depth: Number.isFinite(edge.depth) ? edge.depth : null
     });
   }
 }
 
-function layout(iterations = 160) {
-  const nodes = [...state.nodes.values()];
-  if (!nodes.length) return;
+function buildLayers(centerId) {
+  const incoming = new Map();
+  for (const n of state.nodes.keys()) incoming.set(n, []);
+  for (const e of state.edges) {
+    if (!incoming.has(e.target)) incoming.set(e.target, []);
+    incoming.get(e.target).push(e.source);
+  }
 
-  const width = 1600;
-  const height = 980;
-  const area = width * height;
-  const k = Math.sqrt(area / nodes.length);
-
-  for (let step = 0; step < iterations; step += 1) {
-    const disp = new Map(nodes.map((n) => [n.id, { x: 0, y: 0 }]));
-
-    for (let i = 0; i < nodes.length; i += 1) {
-      for (let j = i + 1; j < nodes.length; j += 1) {
-        const a = nodes[i];
-        const b = nodes[j];
-        const pa = state.positions.get(a.id);
-        const pb = state.positions.get(b.id);
-        let dx = pa.x - pb.x;
-        let dy = pa.y - pb.y;
-        let dist = Math.hypot(dx, dy) || 0.01;
-        const force = (k * k) / dist;
-        dx /= dist;
-        dy /= dist;
-        disp.get(a.id).x += dx * force;
-        disp.get(a.id).y += dy * force;
-        disp.get(b.id).x -= dx * force;
-        disp.get(b.id).y -= dy * force;
+  const depthMap = new Map([[centerId, 0]]);
+  const q = [centerId];
+  while (q.length) {
+    const cur = q.shift();
+    const d = depthMap.get(cur) || 0;
+    const parents = incoming.get(cur) || [];
+    for (const p of parents) {
+      if (!depthMap.has(p)) {
+        depthMap.set(p, d + 1);
+        q.push(p);
       }
     }
-
-    for (const edge of state.edges) {
-      const pa = state.positions.get(edge.source);
-      const pb = state.positions.get(edge.target);
-      if (!pa || !pb) continue;
-      let dx = pa.x - pb.x;
-      let dy = pa.y - pb.y;
-      let dist = Math.hypot(dx, dy) || 0.01;
-      const force = (dist * dist) / k;
-      dx /= dist;
-      dy /= dist;
-      disp.get(edge.source).x -= dx * force;
-      disp.get(edge.source).y -= dy * force;
-      disp.get(edge.target).x += dx * force;
-      disp.get(edge.target).y += dy * force;
-    }
-
-    const temp = Math.max(1, 50 * (1 - step / iterations));
-    for (const n of nodes) {
-      const p = state.positions.get(n.id);
-      const d = disp.get(n.id);
-      const dist = Math.hypot(d.x, d.y) || 0.01;
-      p.x += (d.x / dist) * Math.min(dist, temp);
-      p.y += (d.y / dist) * Math.min(dist, temp);
-      p.x = Math.min(width - 60, Math.max(60, p.x));
-      p.y = Math.min(height - 60, Math.max(60, p.y));
-    }
   }
+
+  for (const id of state.nodes.keys()) {
+    if (!depthMap.has(id)) depthMap.set(id, 1);
+  }
+
+  const layers = new Map();
+  for (const [id, d] of depthMap.entries()) {
+    if (!layers.has(d)) layers.set(d, []);
+    layers.get(d).push(id);
+  }
+  return { depthMap, layers };
 }
 
-function edgePathId(index) {
-  return `edge-path-${index}`;
+function layeredLayout() {
+  const width = 1600;
+  const height = 980;
+  const centerId = state.currentCenter;
+  const { depthMap, layers } = buildLayers(centerId);
+  const maxDepth = Math.max(...layers.keys());
+  const xStep = maxDepth > 0 ? (width - 220) / maxDepth : width / 2;
+
+  for (const [depth, ids] of layers.entries()) {
+    ids.sort((a, b) => {
+      const da = state.edges.filter((e) => e.source === a).length;
+      const db = state.edges.filter((e) => e.source === b).length;
+      if (da !== db) return db - da;
+      return a.localeCompare(b);
+    });
+
+    const laneCount = ids.length;
+    const yGap = laneCount <= 1 ? 0 : (height - 140) / (laneCount - 1);
+    ids.forEach((id, idx) => {
+      const x = 90 + depth * xStep;
+      const y = laneCount <= 1 ? height / 2 : 70 + idx * yGap;
+      state.positions.set(id, { x, y });
+    });
+  }
+
+  if (state.positions.has(centerId)) {
+    const p = state.positions.get(centerId);
+    state.positions.set(centerId, { x: 90, y: p.y });
+  }
+
+  for (const depth of [...layers.keys()]) {
+    if (depth === 0 || !layers.has(depth - 1)) continue;
+    const ids = layers.get(depth);
+    ids.sort((a, b) => {
+      const ta = state.edges.find((e) => e.source === a)?.target || "";
+      const tb = state.edges.find((e) => e.source === b)?.target || "";
+      const ya = state.positions.get(ta)?.y || 0;
+      const yb = state.positions.get(tb)?.y || 0;
+      return ya - yb;
+    });
+    const laneCount = ids.length;
+    const yGap = laneCount <= 1 ? 0 : (height - 140) / (laneCount - 1);
+    ids.forEach((id, idx) => {
+      const pos = state.positions.get(id);
+      state.positions.set(id, { x: pos.x, y: laneCount <= 1 ? height / 2 : 70 + idx * yGap });
+    });
+  }
 }
 
 function relationLabel(edge) {
   const depthText = edge.depth ? `L${edge.depth}` : "L?";
-  const summary = edge.summary ? ` | ${edge.summary}` : "";
-  return `${depthText} ${edge.relationCn}${summary}`;
+  const sm = edge.summary ? ` | ${edge.summary}` : "";
+  return `${depthText} ${edge.relationCn}${sm}`;
 }
 
 function renderNews(news, commentary) {
@@ -277,7 +292,6 @@ function renderNews(news, commentary) {
 }
 
 function render() {
-  clearGroup(ui.defs);
   clearGroup(ui.edges);
   clearGroup(ui.edgeLabels);
   clearGroup(ui.nodes);
@@ -287,32 +301,28 @@ function render() {
     const tp = state.positions.get(e.target);
     if (!sp || !tp) return;
 
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    const pathId = edgePathId(i);
-    const curveSign = i % 2 === 0 ? 1 : -1;
     const mx = (sp.x + tp.x) / 2;
     const my = (sp.y + tp.y) / 2;
     const dx = tp.x - sp.x;
     const dy = tp.y - sp.y;
     const len = Math.hypot(dx, dy) || 1;
-    const nx = (-dy / len) * (16 + (i % 3) * 8) * curveSign;
-    const ny = (dx / len) * (16 + (i % 3) * 8) * curveSign;
-    const d = `M ${sp.x} ${sp.y} Q ${mx + nx} ${my + ny} ${tp.x} ${tp.y}`;
+    const nx = (-dy / len) * (12 + (i % 2) * 6);
+    const ny = (dx / len) * (12 + (i % 2) * 6);
 
-    path.setAttribute("id", pathId);
-    path.setAttribute("d", d);
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", `M ${sp.x} ${sp.y} Q ${mx + nx} ${my + ny} ${tp.x} ${tp.y}`);
     path.setAttribute("fill", "none");
     path.setAttribute("class", "edge");
     ui.edges.appendChild(path);
 
-    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-    text.setAttribute("class", "edge-label");
-    const textPath = document.createElementNS("http://www.w3.org/2000/svg", "textPath");
-    textPath.setAttributeNS("http://www.w3.org/1999/xlink", "href", `#${pathId}`);
-    textPath.setAttribute("startOffset", `${40 + (i % 4) * 8}%`);
-    textPath.textContent = relationLabel(e);
-    text.appendChild(textPath);
-    ui.edgeLabels.appendChild(text);
+    const angle = (Math.atan2(tp.y - sp.y, tp.x - sp.x) * 180) / Math.PI;
+    const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    label.setAttribute("class", "edge-label");
+    label.setAttribute("x", mx + nx * 0.6);
+    label.setAttribute("y", my + ny * 0.6 - 3);
+    label.setAttribute("transform", `rotate(${angle}, ${mx + nx * 0.6}, ${my + ny * 0.6 - 3})`);
+    label.textContent = relationLabel(e);
+    ui.edgeLabels.appendChild(label);
   });
 
   for (const node of state.nodes.values()) {
@@ -329,35 +339,41 @@ function render() {
     g.dataset.nodeId = node.id;
 
     const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-    circle.setAttribute("r", node.type === "target" ? "21" : "17");
+    circle.setAttribute("r", node.type === "target" ? "20" : "16");
     circle.setAttribute("fill", nodeBaseColor(node, metric));
     g.appendChild(circle);
 
-    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-    text.setAttribute("dy", node.type === "target" ? "36" : "31");
-    text.textContent = node.label.length > 16 ? `${node.label.slice(0, 16)}...` : node.label;
-    g.appendChild(text);
+    const title = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    title.setAttribute("x", "0");
+    title.setAttribute("y", "30");
+    title.textContent = node.label.length > 16 ? `${node.label.slice(0, 16)}...` : node.label;
+    g.appendChild(title);
 
     if (metric) {
       const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
       dot.setAttribute("r", "4");
-      dot.setAttribute("cx", "14");
-      dot.setAttribute("cy", "-14");
+      dot.setAttribute("cx", "12");
+      dot.setAttribute("cy", "-12");
       dot.setAttribute("class", metric.dataWeek === "last_week" ? "data-dot-last" : "data-dot-this");
       g.appendChild(dot);
 
       const l1 = document.createElementNS("http://www.w3.org/2000/svg", "text");
-      l1.setAttribute("class", `node-metric ${String(metric.weeklyReturnText || "").startsWith("-") ? "metric-down" : "metric-up"}`);
-      l1.setAttribute("x", "24");
-      l1.setAttribute("y", "-2");
+      l1.setAttribute(
+        "class",
+        `node-metric ${String(metric.weeklyReturnText || "").startsWith("-") ? "metric-down" : "metric-up"}`
+      );
+      l1.setAttribute("x", "26");
+      l1.setAttribute("y", "-5");
       l1.textContent = `周涨跌: ${metric.weeklyReturnText || "-"}`;
       g.appendChild(l1);
 
-      const fundNegative = Number(metric.mainFundNetInflow || 0) < 0;
       const l2 = document.createElementNS("http://www.w3.org/2000/svg", "text");
-      l2.setAttribute("class", `node-metric ${fundNegative ? "metric-outflow" : "metric-inflow"}`);
-      l2.setAttribute("x", "24");
-      l2.setAttribute("y", "11");
+      l2.setAttribute(
+        "class",
+        `node-metric ${Number(metric.mainFundNetInflow || 0) < 0 ? "metric-outflow" : "metric-inflow"}`
+      );
+      l2.setAttribute("x", "26");
+      l2.setAttribute("y", "10");
       l2.textContent = `主力净流入: ${metric.mainFundText || "-"}`;
       g.appendChild(l2);
     }
@@ -369,6 +385,7 @@ function render() {
       if (state.currentCenter) state.history.push(state.currentCenter);
       await showCenterGraph(nextCenter, { useCache: true, resetView: true, forceRefresh: false });
     });
+
     ui.nodes.appendChild(g);
   }
   ui.backBtn.disabled = state.history.length === 0;
@@ -376,16 +393,15 @@ function render() {
 
 async function requestGraph(centerEntity) {
   saveConfig();
-  const payload = {
-    modelName: ui.modelName.value,
-    apiBaseUrl: ui.apiBaseUrl.value.trim(),
-    apiKey: ui.apiKey.value.trim(),
-    centerEntity
-  };
   const resp = await fetch("/api/graph", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
+    body: JSON.stringify({
+      modelName: ui.modelName.value,
+      apiBaseUrl: ui.apiBaseUrl.value.trim(),
+      apiKey: ui.apiKey.value.trim(),
+      centerEntity
+    })
   });
   const data = await resp.json();
   if (!resp.ok) throw new Error(data.error || "请求图谱失败");
@@ -393,17 +409,16 @@ async function requestGraph(centerEntity) {
 }
 
 async function requestEnrich(centerEntity, nodes) {
-  const payload = {
-    modelName: ui.modelName.value,
-    apiBaseUrl: ui.apiBaseUrl.value.trim(),
-    apiKey: ui.apiKey.value.trim(),
-    centerEntity,
-    nodes
-  };
   const resp = await fetch("/api/enrich", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
+    body: JSON.stringify({
+      modelName: ui.modelName.value,
+      apiBaseUrl: ui.apiBaseUrl.value.trim(),
+      apiKey: ui.apiKey.value.trim(),
+      centerEntity,
+      nodes
+    })
   });
   const data = await resp.json();
   if (!resp.ok) throw new Error(data.error || "请求增强数据失败");
@@ -424,19 +439,15 @@ async function showCenterGraph(centerEntity, options = {}) {
   ui.buildBtn.disabled = true;
   ui.refreshBtn.disabled = true;
   setStatus(`正在加载 ${center} 深层关系图谱...`);
-
   try {
     let payload = null;
     if (useCache && !forceRefresh) payload = getCachedPayload(center);
-
     if (!payload) {
       const graph = await requestGraph(center);
       const enrich = await requestEnrich(center, graph.nodes || []);
       payload = { graph, enrich };
       setCachedPayload(center, payload);
-      setStatus(`已获取 ${center} 最新深层图谱。`);
     } else {
-      setStatus(`已使用缓存：${center}。`);
       const enrichFresh = await requestEnrich(center, payload.graph?.nodes || []).catch(() => null);
       if (enrichFresh) {
         payload.enrich = enrichFresh;
@@ -445,12 +456,12 @@ async function showCenterGraph(centerEntity, options = {}) {
     }
 
     setGraph(center, payload.graph, payload.enrich?.nodeMetrics || {});
-    layout(170);
+    layeredLayout();
     if (resetView) resetViewport();
     render();
     renderNews(payload.enrich?.news || [], payload.enrich?.commentary || "");
     ui.centerEntity.value = center;
-    setStatus(`当前中心：${center}。点击节点将重建该公司深层图谱。`);
+    setStatus(`当前中心：${center}。同一股票跨端布局保持一致。`);
   } catch (err) {
     setStatus(`加载失败: ${err.message}`, true);
   } finally {
@@ -537,7 +548,28 @@ function initWheelZoom() {
   );
 }
 
-function initPointerGestures() {
+function initMousePan() {
+  let drag = null;
+  ui.svg.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
+    drag = { startX: e.clientX, startY: e.clientY, originX: state.viewport.x, originY: state.viewport.y };
+    ui.svg.classList.add("dragging");
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!drag) return;
+    const dx = (e.clientX - drag.startX) * MOUSE_PAN_GAIN;
+    const dy = (e.clientY - drag.startY) * MOUSE_PAN_GAIN;
+    state.viewport.x = drag.originX + dx;
+    state.viewport.y = drag.originY + dy;
+    applyViewport();
+  });
+  window.addEventListener("mouseup", () => {
+    drag = null;
+    ui.svg.classList.remove("dragging");
+  });
+}
+
+function initTouchGestures() {
   ui.svg.addEventListener("pointerdown", (e) => {
     if (e.pointerType !== "touch") return;
     ui.svg.setPointerCapture(e.pointerId);
@@ -600,7 +632,7 @@ function initPointerGestures() {
 
   function endPointer(pointerId) {
     state.pointers.delete(pointerId);
-    if (state.pointers.size === 0) {
+    if (!state.pointers.size) {
       state.gesture = null;
       ui.svg.classList.remove("dragging");
       return;
@@ -636,7 +668,8 @@ ui.centerEntity.addEventListener("keydown", (e) => {
 });
 
 initWheelZoom();
-initPointerGestures();
+initMousePan();
+initTouchGestures();
 applyViewport();
 loadCache();
 
