@@ -1,0 +1,193 @@
+:root {
+  --bg: #0b1320;
+  --panel: #101b2d;
+  --panel-soft: #182741;
+  --text: #e8eefc;
+  --subtext: #a8bbdd;
+  --accent: #4fd1c5;
+  --danger: #ff7b7b;
+  --edge: #49638e;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: radial-gradient(circle at 30% 20%, #152642 0%, #0b1320 45%, #080d16 100%);
+  color: var(--text);
+}
+
+.app-shell {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-columns: 340px 1fr;
+}
+
+.panel {
+  padding: 20px;
+  background: linear-gradient(180deg, rgba(16, 27, 45, 0.95), rgba(11, 19, 32, 0.95));
+  border-right: 1px solid rgba(130, 170, 230, 0.2);
+  overflow-y: auto;
+}
+
+.panel h1 {
+  margin: 0 0 8px;
+  font-size: 22px;
+}
+
+.hint {
+  margin: 0 0 16px;
+  color: var(--subtext);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+label {
+  display: block;
+  margin: 12px 0 6px;
+  font-size: 13px;
+  color: #c9d6f4;
+}
+
+input,
+select,
+button {
+  width: 100%;
+  border: 1px solid rgba(144, 176, 228, 0.3);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 14px;
+}
+
+input,
+select {
+  background: var(--panel-soft);
+  color: var(--text);
+  outline: none;
+}
+
+input:focus,
+select:focus {
+  border-color: var(--accent);
+}
+
+button {
+  margin-top: 12px;
+  background: linear-gradient(120deg, #2d8cf0, #35c0a6);
+  color: #fff;
+  cursor: pointer;
+  border: none;
+}
+
+button.secondary {
+  background: #253754;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.tips {
+  margin-top: 16px;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(26, 43, 72, 0.55);
+  font-size: 13px;
+  color: var(--subtext);
+}
+
+.tips ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.status {
+  margin-top: 16px;
+  min-height: 42px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(30, 45, 74, 0.8);
+  color: #cae3ff;
+  font-size: 13px;
+}
+
+.status.error {
+  color: var(--danger);
+}
+
+.graph-wrap {
+  position: relative;
+  min-width: 0;
+}
+
+#graphSvg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
+}
+
+#graphSvg.dragging {
+  cursor: grabbing;
+}
+
+.edge {
+  stroke: var(--edge);
+  stroke-width: 1.2;
+  opacity: 0.85;
+}
+
+.edge-label {
+  fill: #9ec3ff;
+  font-size: 11px;
+  pointer-events: none;
+}
+
+.node circle {
+  stroke: #dbe8ff;
+  stroke-width: 1;
+}
+
+.node.target circle {
+  fill: #ffb347;
+}
+
+.node.company circle {
+  fill: #3ea3ff;
+}
+
+.node.index circle {
+  fill: #7cc576;
+}
+
+.node text {
+  fill: #f1f5ff;
+  font-size: 12px;
+  text-anchor: middle;
+  pointer-events: none;
+}
+
+.node.active circle {
+  stroke: #4fd1c5;
+  stroke-width: 2;
+}
+
+@media (max-width: 960px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+
+  .panel {
+    border-right: none;
+    border-bottom: 1px solid rgba(130, 170, 230, 0.2);
+  }
+}

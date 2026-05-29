@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: stock-relationship-graph
+    runtime: node
+    plan: free
+    buildCommand: "npm install"
+    startCommand: "node server.js"
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: DEFAULT_PROVIDER
+        value: "deepseek"
+      - key: DEFAULT_API_BASE_URL
+        value: "https://api.deepseek.com/v1"
+      - key: DEEPSEEK_API_KEY
+        sync: false
