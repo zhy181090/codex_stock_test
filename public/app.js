@@ -421,13 +421,6 @@ function render() {
     g.appendChild(title);
 
     if (metric) {
-      const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-      dot.setAttribute("r", "4");
-      dot.setAttribute("cx", "14");
-      dot.setAttribute("cy", "-20");
-      dot.setAttribute("class", metric.dataWeek === "last_week" ? "data-dot-last" : "data-dot-this");
-      g.appendChild(dot);
-
       const l1 = document.createElementNS("http://www.w3.org/2000/svg", "text");
       l1.setAttribute("class", "node-metric metric-neutral");
       l1.setAttribute("x", "0");

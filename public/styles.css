@@ -252,7 +252,7 @@ button:disabled {
 }
 
 .node.active circle {
-  stroke: #4fd1c5;
+  stroke: #dbe8ff;
   stroke-width: 2;
 }
 
