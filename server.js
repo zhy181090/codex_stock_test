@@ -73,6 +73,8 @@ function normalizeGraph(raw, centerEntity) {
       source,
       target,
       relation: String(edge.relation || "related"),
+      relationCn: String(edge.relationCn || edge.relation_cn || edge.relation || "相关"),
+      summary: String(edge.summary || edge.summary_cn || ""),
       confidence: Number.isFinite(edge.confidence) ? edge.confidence : undefined
     });
   }
@@ -118,26 +120,28 @@ async function fetchGraphFromAI({ modelName, apiKey, apiBaseUrl, centerEntity, c
   const cfg = getModelConfig(modelName, apiKey, apiBaseUrl);
 
   const systemPrompt = [
-    "You are a financial knowledge graph generator.",
-    "Return strict JSON only, no markdown and no extra text.",
-    "Build company relationship graph around the target stock/company.",
-    "Allowed relation examples: supplier, customer, competitor, investor, partner, index_member, subsidiary, regulator_impact.",
-    "Output format:",
+    "你是股票产业关系图谱生成器。",
+    "仅返回严格 JSON，不要 markdown，不要额外解释。",
+    "围绕目标公司生成 1 跳关系图谱，偏重产业链、客户、竞争和资本关系。",
+    "每条边必须给中文关系名 relationCn 和中文简述 summary。",
+    "输出格式：",
     "{",
-    '  "nodes":[{"id":"NVIDIA","label":"NVIDIA","type":"target","ticker":"NVDA"}],',
-    '  "edges":[{"source":"TSMC","target":"NVIDIA","relation":"supplier","confidence":0.84}]',
+    '  "nodes":[{"id":"NVIDIA","label":"英伟达","type":"target","ticker":"NVDA"}],',
+    '  "edges":[{"source":"台积电","target":"英伟达","relation":"supplier","relationCn":"上游供应","summary":"为其代工 AI GPU 芯片","confidence":0.84}]',
     "}",
-    "Rules:",
-    "1) Include 6-15 nodes.",
-    "2) Node id must be unique and stable text.",
-    "3) Edge source and target must reference existing node ids.",
-    "4) Use confidence in [0,1] when known; omit if uncertain."
+    "规则：",
+    "1) 节点 6-12 个，中心公司必须存在。",
+    "2) 节点 id 唯一、稳定，优先中文公司名（必要时可带英文简称）。",
+    "3) source/target 必须引用已有节点 id。",
+    "4) relation 用英文短词；relationCn 用中文（如 上游供应/下游客户/竞争对手/合作伙伴/股权投资）。",
+    "5) summary 用中文短句，12-28 字，尽量描述具体业务联系。",
+    "6) 有把握时给 confidence(0-1)，不确定可省略。"
   ].join("\n");
 
   const userPrompt = [
-    `Target: ${centerEntity}`,
-    context ? `Existing context: ${context}` : "Existing context: none",
-    "Generate only the next-hop meaningful graph around target."
+    `目标公司: ${centerEntity}`,
+    context ? `补充上下文: ${context}` : "补充上下文: 无",
+    "请生成一份新的、可视化友好的关系图谱。"
   ].join("\n");
 
   const requestBody = {

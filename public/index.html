@@ -10,31 +10,35 @@
     <div class="app-shell">
       <aside class="panel">
         <h1>股票关系图谱</h1>
-        <p class="hint">输入股票名称或代码，AI 生成可点击扩展的公司关系网络。</p>
+        <p class="hint">输入股票名称或代码，生成单中心关系网。点击节点将切换到该公司新图谱。</p>
 
         <label>模型提供商</label>
         <select id="modelName">
           <option value="deepseek">DeepSeek</option>
         </select>
 
-        <label>API Base URL (可选)</label>
-        <input id="apiBaseUrl" placeholder="默认: https://api.deepseek.com" />
+        <label>API Base URL（可选）</label>
+        <input id="apiBaseUrl" placeholder="默认: https://api.deepseek.com/v1" />
 
-        <label>API Key</label>
-        <input id="apiKey" type="password" placeholder="输入你的 API Key" />
+        <label>API Key（可选）</label>
+        <input id="apiKey" type="password" placeholder="已配置服务端密钥可留空" />
 
         <label>股票名称/代码</label>
-        <input id="centerEntity" placeholder="如: 英伟达 / NVDA / NVIDIA" />
+        <input id="centerEntity" placeholder="例如：英伟达 / NVDA / NVIDIA" />
 
-        <button id="buildBtn">生成图谱</button>
-        <button id="clearBtn" class="secondary">清空画布</button>
+        <div class="actions">
+          <button id="buildBtn">生成图谱</button>
+          <button id="backBtn" class="secondary">返回上一步</button>
+          <button id="refreshBtn" class="secondary">刷新当前</button>
+          <button id="clearBtn" class="secondary">清空画布</button>
+        </div>
 
         <div class="tips">
-          <strong>操作说明</strong>
+          <strong>触控说明</strong>
           <ul>
-            <li>拖动画布可平移</li>
-            <li>滚轮缩放</li>
-            <li>点击公司节点可继续围绕该公司扩展</li>
+            <li>单指拖动画布</li>
+            <li>双指捏合缩放</li>
+            <li>点按公司节点切换中心公司</li>
           </ul>
         </div>
 

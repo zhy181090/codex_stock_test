@@ -1,10 +1,20 @@
+const CACHE_KEY = "stock_graph_cache_v1";
+const CONFIG_KEY = "stock_graph_config";
+const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const CACHE_MAX_ENTRIES = 30;
+
 const state = {
   nodes: new Map(),
   edges: [],
   positions: new Map(),
   activeNodeId: "",
+  currentCenter: "",
+  history: [],
   viewport: { x: 0, y: 0, scale: 1 },
-  serverKeyConfigured: false
+  serverKeyConfigured: false,
+  cache: new Map(),
+  pointers: new Map(),
+  gesture: null
 };
 
 const ui = {
@@ -13,6 +23,8 @@ const ui = {
   apiKey: document.getElementById("apiKey"),
   centerEntity: document.getElementById("centerEntity"),
   buildBtn: document.getElementById("buildBtn"),
+  backBtn: document.getElementById("backBtn"),
+  refreshBtn: document.getElementById("refreshBtn"),
   clearBtn: document.getElementById("clearBtn"),
   status: document.getElementById("status"),
   svg: document.getElementById("graphSvg"),
@@ -33,7 +45,7 @@ function toId(value) {
 
 function getSavedConfig() {
   try {
-    return JSON.parse(localStorage.getItem("stock_graph_config") || "{}");
+    return JSON.parse(localStorage.getItem(CONFIG_KEY) || "{}");
   } catch {
     return {};
   }
@@ -45,7 +57,7 @@ function saveConfig() {
     apiBaseUrl: ui.apiBaseUrl.value.trim(),
     apiKey: ui.apiKey.value.trim()
   };
-  localStorage.setItem("stock_graph_config", JSON.stringify(cfg));
+  localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg));
 }
 
 function loadConfigToForm(serverCfg) {
@@ -65,7 +77,64 @@ async function loadServerConfig() {
   return data;
 }
 
-function mergeGraph(graph) {
+function cacheConfigKey() {
+  return `${ui.modelName.value}|${ui.apiBaseUrl.value.trim()}`;
+}
+
+function graphCacheKey(centerEntity) {
+  return `${cacheConfigKey()}|${toId(centerEntity).toLowerCase()}`;
+}
+
+function loadCache() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(CACHE_KEY) || "[]");
+    const now = Date.now();
+    const valid = raw.filter((item) => item && item.key && item.ts && now - item.ts < CACHE_TTL_MS);
+    state.cache = new Map(valid.map((item) => [item.key, item]));
+    persistCache();
+  } catch {
+    state.cache = new Map();
+  }
+}
+
+function persistCache() {
+  const arr = [...state.cache.values()].sort((a, b) => b.ts - a.ts).slice(0, CACHE_MAX_ENTRIES);
+  localStorage.setItem(CACHE_KEY, JSON.stringify(arr));
+}
+
+function getCachedGraph(centerEntity) {
+  const key = graphCacheKey(centerEntity);
+  const item = state.cache.get(key);
+  if (!item) return null;
+  if (Date.now() - item.ts >= CACHE_TTL_MS) {
+    state.cache.delete(key);
+    persistCache();
+    return null;
+  }
+  item.ts = Date.now();
+  state.cache.set(key, item);
+  persistCache();
+  return item.graph;
+}
+
+function setCachedGraph(centerEntity, graph) {
+  const key = graphCacheKey(centerEntity);
+  state.cache.set(key, { key, ts: Date.now(), graph });
+  persistCache();
+}
+
+function resetViewport() {
+  state.viewport = { x: 0, y: 0, scale: 1 };
+  applyViewport();
+}
+
+function setGraph(centerEntity, graph) {
+  state.nodes.clear();
+  state.edges = [];
+  state.positions.clear();
+  state.activeNodeId = centerEntity;
+  state.currentCenter = centerEntity;
+
   for (const node of graph.nodes || []) {
     const id = toId(node.id);
     if (!id) continue;
@@ -80,18 +149,20 @@ function mergeGraph(graph) {
     }
   }
 
-  const edgeSet = new Set(state.edges.map((e) => `${e.source}|${e.target}|${e.relation}`));
+  const edgeSet = new Set();
   for (const edge of graph.edges || []) {
     const source = toId(edge.source);
     const target = toId(edge.target);
     if (!source || !target) continue;
-    const key = `${source}|${target}|${edge.relation || "related"}`;
+    const key = `${source}|${target}|${edge.relation || "related"}|${edge.summary || ""}`;
     if (edgeSet.has(key)) continue;
     edgeSet.add(key);
     state.edges.push({
       source,
       target,
       relation: edge.relation || "related",
+      relationCn: edge.relationCn || "相关",
+      summary: edge.summary || "",
       confidence: typeof edge.confidence === "number" ? edge.confidence : null
     });
   }
@@ -183,14 +254,15 @@ function render() {
     label.setAttribute("x", (sp.x + tp.x) / 2);
     label.setAttribute("y", (sp.y + tp.y) / 2 - 6);
     label.setAttribute("class", "edge-label");
-    const suffix = e.confidence != null ? ` ${(e.confidence * 100).toFixed(0)}%` : "";
-    label.textContent = `${e.relation}${suffix}`;
+    const shortSummary = e.summary ? ` | ${e.summary}` : "";
+    label.textContent = `${e.relationCn}${shortSummary}`;
     ui.edgeLabels.appendChild(label);
   }
 
   for (const node of state.nodes.values()) {
     const p = state.positions.get(node.id);
     if (!p) continue;
+
     const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
     g.setAttribute(
       "class",
@@ -202,7 +274,7 @@ function render() {
     g.dataset.nodeId = node.id;
 
     const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-    circle.setAttribute("r", node.type === "target" ? "20" : "15");
+    circle.setAttribute("r", node.type === "target" ? "20" : "16");
     g.appendChild(circle);
 
     const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
@@ -212,23 +284,26 @@ function render() {
 
     g.addEventListener("click", async (evt) => {
       evt.stopPropagation();
-      state.activeNodeId = node.id;
-      render();
-      await expandFromNode(node.id);
+      const nextCenter = node.label || node.id;
+      if (nextCenter === state.currentCenter) return;
+      if (state.currentCenter) state.history.push(state.currentCenter);
+      await showCenterGraph(nextCenter, { useCache: true, resetView: true, forceRefresh: false });
     });
 
     ui.nodes.appendChild(g);
   }
+
+  ui.backBtn.disabled = state.history.length === 0;
 }
 
-async function requestGraph(centerEntity, context = "") {
+async function requestGraph(centerEntity) {
   saveConfig();
   const payload = {
     modelName: ui.modelName.value,
     apiBaseUrl: ui.apiBaseUrl.value.trim(),
     apiKey: ui.apiKey.value.trim(),
     centerEntity,
-    context
+    context: ""
   };
 
   const resp = await fetch("/api/graph", {
@@ -244,49 +319,70 @@ async function requestGraph(centerEntity, context = "") {
   return data.graph;
 }
 
-async function buildInitialGraph() {
-  const center = ui.centerEntity.value.trim();
+async function showCenterGraph(centerEntity, options = {}) {
+  const center = toId(centerEntity);
   if (!center) {
     setStatus("请先输入股票名称或代码。", true);
     return;
   }
-  if (!ui.apiKey.value.trim() && !state.serverKeyConfigured) {
-    setStatus("请先输入 API Key，或在服务器环境变量配置 DEEPSEEK_API_KEY。", true);
-    return;
-  }
+
+  const useCache = options.useCache !== false;
+  const forceRefresh = options.forceRefresh === true;
+  const resetView = options.resetView === true;
 
   ui.buildBtn.disabled = true;
-  setStatus(`正在生成 ${center} 的关系图谱...`);
-  try {
-    state.nodes.clear();
-    state.edges = [];
-    state.positions.clear();
-    state.activeNodeId = center;
+  ui.refreshBtn.disabled = true;
+  setStatus(`正在加载 ${center} 关系图谱...`);
 
-    const graph = await requestGraph(center);
-    mergeGraph(graph);
-    layout(180);
+  try {
+    let graph = null;
+    if (useCache && !forceRefresh) {
+      graph = getCachedGraph(center);
+    }
+    if (!graph) {
+      graph = await requestGraph(center);
+      setCachedGraph(center, graph);
+      setStatus(`已获取 ${center} 最新图谱。`);
+    } else {
+      setStatus(`已使用缓存：${center}。`);
+    }
+
+    setGraph(center, graph);
+    layout(160);
+    if (resetView) resetViewport();
     render();
-    setStatus(`已生成 ${center} 关系图谱。点击任意节点继续扩展。`);
+    ui.centerEntity.value = center;
+    setStatus(`当前中心：${center}。点节点可切换到该公司新图谱。`);
   } catch (err) {
-    setStatus(`生成失败: ${err.message}`, true);
+    setStatus(`加载失败: ${err.message}`, true);
   } finally {
     ui.buildBtn.disabled = false;
+    ui.refreshBtn.disabled = false;
   }
 }
 
-async function expandFromNode(nodeId) {
-  setStatus(`正在扩展 ${nodeId} 相关关系...`);
-  try {
-    const context = `Current nodes: ${[...state.nodes.keys()].slice(0, 60).join(", ")}`;
-    const graph = await requestGraph(nodeId, context);
-    mergeGraph(graph);
-    layout(100);
-    render();
-    setStatus(`已扩展 ${nodeId}。可继续点击其他节点。`);
-  } catch (err) {
-    setStatus(`扩展失败: ${err.message}`, true);
+async function buildInitialGraph() {
+  const center = ui.centerEntity.value.trim();
+  if (!ui.apiKey.value.trim() && !state.serverKeyConfigured) {
+    setStatus("请先输入 API Key，或在服务端配置 DEEPSEEK_API_KEY。", true);
+    return;
   }
+  state.history = [];
+  await showCenterGraph(center, { useCache: true, resetView: true, forceRefresh: false });
+}
+
+async function refreshCurrentGraph() {
+  if (!state.currentCenter) {
+    setStatus("当前没有可刷新的图谱。", true);
+    return;
+  }
+  await showCenterGraph(state.currentCenter, { useCache: false, resetView: false, forceRefresh: true });
+}
+
+async function goBack() {
+  if (!state.history.length) return;
+  const prev = state.history.pop();
+  await showCenterGraph(prev, { useCache: true, resetView: true, forceRefresh: false });
 }
 
 function clearCanvas() {
@@ -294,7 +390,10 @@ function clearCanvas() {
   state.edges = [];
   state.positions.clear();
   state.activeNodeId = "";
+  state.currentCenter = "";
+  state.history = [];
   render();
+  resetViewport();
   setStatus("已清空画布。");
 }
 
@@ -303,57 +402,144 @@ function applyViewport() {
   ui.viewport.setAttribute("transform", `translate(${x}, ${y}) scale(${scale})`);
 }
 
-function initPanZoom() {
-  let dragging = false;
-  let start = { x: 0, y: 0 };
-  let origin = { x: 0, y: 0 };
+function svgPointFromClient(clientX, clientY) {
+  const rect = ui.svg.getBoundingClientRect();
+  return { x: clientX - rect.left, y: clientY - rect.top };
+}
 
-  ui.svg.addEventListener("mousedown", (e) => {
-    dragging = true;
-    ui.svg.classList.add("dragging");
-    start = { x: e.clientX, y: e.clientY };
-    origin = { x: state.viewport.x, y: state.viewport.y };
-  });
-  window.addEventListener("mouseup", () => {
-    dragging = false;
-    ui.svg.classList.remove("dragging");
-  });
-  window.addEventListener("mousemove", (e) => {
-    if (!dragging) return;
-    state.viewport.x = origin.x + (e.clientX - start.x);
-    state.viewport.y = origin.y + (e.clientY - start.y);
-    applyViewport();
-  });
+function clampScale(scale) {
+  return Math.max(0.3, Math.min(3.2, scale));
+}
 
+function zoomAroundPoint(clientX, clientY, factor) {
+  const oldScale = state.viewport.scale;
+  const newScale = clampScale(oldScale * factor);
+  if (newScale === oldScale) return;
+
+  const p = svgPointFromClient(clientX, clientY);
+  const worldX = (p.x - state.viewport.x) / oldScale;
+  const worldY = (p.y - state.viewport.y) / oldScale;
+  state.viewport.scale = newScale;
+  state.viewport.x = p.x - worldX * newScale;
+  state.viewport.y = p.y - worldY * newScale;
+  applyViewport();
+}
+
+function initWheelZoom() {
   ui.svg.addEventListener(
     "wheel",
     (e) => {
       e.preventDefault();
-      const delta = e.deltaY > 0 ? -0.08 : 0.08;
-      state.viewport.scale = Math.max(0.3, Math.min(2.6, state.viewport.scale + delta));
-      applyViewport();
+      const factor = e.deltaY > 0 ? 0.92 : 1.08;
+      zoomAroundPoint(e.clientX, e.clientY, factor);
     },
     { passive: false }
   );
 }
 
+function initPointerGestures() {
+  ui.svg.addEventListener("pointerdown", (e) => {
+    ui.svg.setPointerCapture(e.pointerId);
+    state.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (state.pointers.size === 1) {
+      state.gesture = {
+        mode: "pan",
+        startX: e.clientX,
+        startY: e.clientY,
+        originX: state.viewport.x,
+        originY: state.viewport.y
+      };
+      ui.svg.classList.add("dragging");
+    } else if (state.pointers.size === 2) {
+      const pts = [...state.pointers.values()];
+      const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1;
+      const cx = (pts[0].x + pts[1].x) / 2;
+      const cy = (pts[0].y + pts[1].y) / 2;
+      state.gesture = {
+        mode: "pinch",
+        startDistance: dist,
+        startScale: state.viewport.scale,
+        centerX: cx,
+        centerY: cy,
+        originX: state.viewport.x,
+        originY: state.viewport.y
+      };
+      ui.svg.classList.add("dragging");
+    }
+  });
+
+  ui.svg.addEventListener("pointermove", (e) => {
+    if (!state.pointers.has(e.pointerId)) return;
+    state.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (!state.gesture) return;
+
+    if (state.gesture.mode === "pan" && state.pointers.size === 1) {
+      const dx = e.clientX - state.gesture.startX;
+      const dy = e.clientY - state.gesture.startY;
+      state.viewport.x = state.gesture.originX + dx;
+      state.viewport.y = state.gesture.originY + dy;
+      applyViewport();
+      return;
+    }
+
+    if (state.pointers.size >= 2) {
+      const pts = [...state.pointers.values()];
+      const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1;
+      const cx = (pts[0].x + pts[1].x) / 2;
+      const cy = (pts[0].y + pts[1].y) / 2;
+      const factor = dist / (state.gesture.startDistance || dist);
+      const targetScale = clampScale((state.gesture.startScale || 1) * factor);
+      const p = svgPointFromClient(cx, cy);
+      const worldX = (p.x - state.gesture.originX) / (state.gesture.startScale || 1);
+      const worldY = (p.y - state.gesture.originY) / (state.gesture.startScale || 1);
+      state.viewport.scale = targetScale;
+      state.viewport.x = p.x - worldX * targetScale;
+      state.viewport.y = p.y - worldY * targetScale;
+      applyViewport();
+    }
+  });
+
+  function endPointer(pointerId) {
+    state.pointers.delete(pointerId);
+    if (state.pointers.size === 0) {
+      state.gesture = null;
+      ui.svg.classList.remove("dragging");
+      return;
+    }
+    if (state.pointers.size === 1) {
+      const [pt] = state.pointers.values();
+      state.gesture = {
+        mode: "pan",
+        startX: pt.x,
+        startY: pt.y,
+        originX: state.viewport.x,
+        originY: state.viewport.y
+      };
+    }
+  }
+
+  ui.svg.addEventListener("pointerup", (e) => endPointer(e.pointerId));
+  ui.svg.addEventListener("pointercancel", (e) => endPointer(e.pointerId));
+}
+
 ui.buildBtn.addEventListener("click", buildInitialGraph);
+ui.backBtn.addEventListener("click", goBack);
+ui.refreshBtn.addEventListener("click", refreshCurrentGraph);
 ui.clearBtn.addEventListener("click", clearCanvas);
 ui.centerEntity.addEventListener("keydown", (e) => {
   if (e.key === "Enter") buildInitialGraph();
 });
 
-initPanZoom();
+initWheelZoom();
+initPointerGestures();
 applyViewport();
+loadCache();
 
 loadServerConfig()
   .then((cfg) => {
     loadConfigToForm(cfg);
-    setStatus(
-      cfg.serverKeyConfigured
-        ? "服务器已配置密钥，手机端可直接使用。"
-        : "请输入 API Key（浏览器会自动保存）。"
-    );
+    setStatus(cfg.serverKeyConfigured ? "服务端密钥已配置，可直接使用。" : "请输入 API Key（将本地缓存）。");
   })
   .catch((err) => {
     setStatus(`初始化失败: ${err.message}`, true);

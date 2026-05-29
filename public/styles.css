@@ -133,6 +133,8 @@ button:disabled {
   height: 100%;
   display: block;
   cursor: grab;
+  touch-action: none;
+  user-select: none;
 }
 
 #graphSvg.dragging {
@@ -189,5 +191,17 @@ button:disabled {
   .panel {
     border-right: none;
     border-bottom: 1px solid rgba(130, 170, 230, 0.2);
+  }
+
+  .edge-label {
+    font-size: 12px;
+  }
+
+  .node text {
+    font-size: 13px;
+  }
+
+  button {
+    min-height: 42px;
   }
 }
