@@ -284,6 +284,11 @@ function edgeKey(edge) {
   return `${edge.source}|${edge.target}|${edge.depth || ""}|${edge.relationCn || ""}|${edge.summary || ""}`;
 }
 
+function nodeRadiusById(nodeId) {
+  const node = state.nodes.get(nodeId);
+  return node?.type === "target" ? 20 : 16;
+}
+
 function wrapTextByLen(text, maxLen = 18) {
   const raw = String(text || "");
   if (!raw) return [];
@@ -324,16 +329,29 @@ function render() {
     const tp = state.positions.get(e.target);
     if (!sp || !tp) return;
 
-    const mx = (sp.x + tp.x) / 2;
-    const my = (sp.y + tp.y) / 2;
-    const dx = tp.x - sp.x;
-    const dy = tp.y - sp.y;
+    const dx0 = tp.x - sp.x;
+    const dy0 = tp.y - sp.y;
+    const len0 = Math.hypot(dx0, dy0) || 1;
+    const ux = dx0 / len0;
+    const uy = dy0 / len0;
+    const rs = nodeRadiusById(e.source) + 2;
+    const rt = nodeRadiusById(e.target) + 3;
+
+    const x1 = sp.x + ux * rs;
+    const y1 = sp.y + uy * rs;
+    const x2 = tp.x - ux * rt;
+    const y2 = tp.y - uy * rt;
+
+    const mx = (x1 + x2) / 2;
+    const my = (y1 + y2) / 2;
+    const dx = x2 - x1;
+    const dy = y2 - y1;
     const len = Math.hypot(dx, dy) || 1;
     const nx = (-dy / len) * (12 + (i % 2) * 6);
     const ny = (dx / len) * (12 + (i % 2) * 6);
 
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    path.setAttribute("d", `M ${sp.x} ${sp.y} Q ${mx + nx} ${my + ny} ${tp.x} ${tp.y}`);
+    path.setAttribute("d", `M ${x1} ${y1} Q ${mx + nx} ${my + ny} ${x2} ${y2}`);
     path.setAttribute("fill", "none");
     path.setAttribute("class", `edge ${edgeTypeClass(e.relationCn)}`);
     path.setAttribute("stroke", edgeTypeColor(e.relationCn));
