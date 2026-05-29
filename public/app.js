@@ -2,6 +2,7 @@ const CACHE_KEY = "stock_graph_cache_v1";
 const CONFIG_KEY = "stock_graph_config";
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 30;
+const TOUCH_PAN_GAIN = 1.35;
 
 const state = {
   nodes: new Map(),
@@ -439,6 +440,7 @@ function initWheelZoom() {
 
 function initPointerGestures() {
   ui.svg.addEventListener("pointerdown", (e) => {
+    if (e.pointerType !== "touch") return;
     ui.svg.setPointerCapture(e.pointerId);
     state.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
@@ -470,13 +472,14 @@ function initPointerGestures() {
   });
 
   ui.svg.addEventListener("pointermove", (e) => {
+    if (e.pointerType !== "touch") return;
     if (!state.pointers.has(e.pointerId)) return;
     state.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (!state.gesture) return;
 
     if (state.gesture.mode === "pan" && state.pointers.size === 1) {
-      const dx = e.clientX - state.gesture.startX;
-      const dy = e.clientY - state.gesture.startY;
+      const dx = (e.clientX - state.gesture.startX) * TOUCH_PAN_GAIN;
+      const dy = (e.clientY - state.gesture.startY) * TOUCH_PAN_GAIN;
       state.viewport.x = state.gesture.originX + dx;
       state.viewport.y = state.gesture.originY + dy;
       applyViewport();
@@ -519,8 +522,14 @@ function initPointerGestures() {
     }
   }
 
-  ui.svg.addEventListener("pointerup", (e) => endPointer(e.pointerId));
-  ui.svg.addEventListener("pointercancel", (e) => endPointer(e.pointerId));
+  ui.svg.addEventListener("pointerup", (e) => {
+    if (e.pointerType !== "touch") return;
+    endPointer(e.pointerId);
+  });
+  ui.svg.addEventListener("pointercancel", (e) => {
+    if (e.pointerType !== "touch") return;
+    endPointer(e.pointerId);
+  });
 }
 
 ui.buildBtn.addEventListener("click", buildInitialGraph);
