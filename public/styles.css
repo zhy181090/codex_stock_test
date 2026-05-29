@@ -183,9 +183,25 @@ button:disabled {
 }
 
 .edge {
-  stroke: var(--edge);
   stroke-width: 1.2;
   opacity: 0.78;
+  fill: none;
+}
+
+.edge-red {
+  stroke: #ff4d4f;
+}
+
+.edge-green {
+  stroke: #34c759;
+}
+
+.edge-yellow {
+  stroke: #ffcc00;
+}
+
+.edge-blue {
+  stroke: #3b82f6;
 }
 
 .edge-label {
@@ -203,15 +219,16 @@ button:disabled {
 }
 
 .edge-detail-box {
-  fill: rgba(12, 22, 40, 0.95);
-  stroke: rgba(160, 190, 240, 0.6);
+  fill: #ffd84d;
+  stroke: #f0b400;
   stroke-width: 1;
 }
 
 .edge-detail-text {
-  fill: #dce9ff;
+  fill: #1a1a1a;
   font-size: 11px;
   pointer-events: none;
+  font-weight: 600;
 }
 
 .node circle {

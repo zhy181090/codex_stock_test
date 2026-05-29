@@ -273,6 +273,14 @@ function edgeTypeColor(relationCn) {
   return "#3b82f6";
 }
 
+function edgeTypeClass(relationCn) {
+  const v = String(relationCn || "");
+  if (v.includes("刚需垄断")) return "edge-red";
+  if (v.includes("技术壁垒")) return "edge-green";
+  if (v.includes("国产替代")) return "edge-yellow";
+  return "edge-blue";
+}
+
 function edgeKey(edge) {
   return `${edge.source}|${edge.target}|${edge.depth || ""}|${edge.relationCn || ""}|${edge.summary || ""}`;
 }
@@ -328,7 +336,7 @@ function render() {
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("d", `M ${sp.x} ${sp.y} Q ${mx + nx} ${my + ny} ${tp.x} ${tp.y}`);
     path.setAttribute("fill", "none");
-    path.setAttribute("class", "edge");
+    path.setAttribute("class", `edge ${edgeTypeClass(e.relationCn)}`);
     path.setAttribute("stroke", edgeTypeColor(e.relationCn));
     path.setAttribute("marker-end", `url(#arrow-${edgeTypeColor(e.relationCn).slice(1)})`);
     ui.edges.appendChild(path);
