@@ -6,6 +6,10 @@ const PORT = process.env.PORT || 3000;
 const DEFAULT_PROVIDER = process.env.DEFAULT_PROVIDER || "deepseek";
 const DEFAULT_API_BASE_URL = process.env.DEFAULT_API_BASE_URL || "https://api.deepseek.com/v1";
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || "";
+const FINANCE_API_BASE_URL = process.env.FINANCE_API_BASE_URL || "";
+const FINANCE_API_KEY = process.env.FINANCE_API_KEY || "";
+const NEWS_API_BASE_URL = process.env.NEWS_API_BASE_URL || "";
+const NEWS_API_KEY = process.env.NEWS_API_KEY || "";
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -24,26 +28,59 @@ function readBody(req) {
     let data = "";
     req.on("data", (chunk) => {
       data += chunk;
-      if (data.length > 2 * 1024 * 1024) {
-        reject(new Error("Request body too large"));
-      }
+      if (data.length > 2 * 1024 * 1024) reject(new Error("Request body too large"));
     });
     req.on("end", () => resolve(data));
     req.on("error", reject);
   });
 }
 
-function normalizeGraph(raw, centerEntity) {
-  if (!raw || typeof raw !== "object") {
-    throw new Error("AI returned invalid JSON");
+function safeJsonParse(text, fallback = null) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return fallback;
   }
+}
 
+function ensureDeepSeekBaseUrl(url) {
+  const raw = String(url || "").trim().replace(/\/+$/, "");
+  if (!raw) return "https://api.deepseek.com/v1";
+  if (/\/v1$/i.test(raw)) return raw;
+  if (/^https?:\/\/api\.deepseek\.com$/i.test(raw)) return `${raw}/v1`;
+  return raw;
+}
+
+function joinUrl(base, suffix) {
+  return `${String(base || "").replace(/\/+$/, "")}/${String(suffix || "").replace(/^\/+/, "")}`;
+}
+
+function getModelConfig(modelName, apiKey, apiBaseUrl) {
+  const model = String(modelName || "").trim().toLowerCase();
+  const inputKey = String(apiKey || "").trim();
+  const baseUrl = String(apiBaseUrl || "").trim();
+
+  if (model === "deepseek") {
+    const key = inputKey || DEEPSEEK_API_KEY;
+    if (!key) throw new Error("API Key is required (input key or DEEPSEEK_API_KEY env)");
+    return {
+      endpoint: joinUrl(ensureDeepSeekBaseUrl(baseUrl || DEFAULT_API_BASE_URL), "/chat/completions"),
+      payloadModel: "deepseek-chat",
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json"
+      }
+    };
+  }
+  throw new Error(`Unsupported model provider: ${modelName}`);
+}
+
+function normalizeGraph(raw, centerEntity) {
+  if (!raw || typeof raw !== "object") throw new Error("AI returned invalid JSON");
   let nodes = Array.isArray(raw.nodes) ? raw.nodes : [];
   let edges = Array.isArray(raw.edges) ? raw.edges : [];
 
-  if (nodes.length === 0) {
-    nodes = [{ id: centerEntity, label: centerEntity, type: "target" }];
-  }
+  if (!nodes.length) nodes = [{ id: centerEntity, label: centerEntity, type: "target" }];
 
   const nodeMap = new Map();
   for (const node of nodes) {
@@ -54,12 +91,13 @@ function normalizeGraph(raw, centerEntity) {
       id,
       label: String(node.label || id),
       type: String(node.type || "company"),
-      ticker: node.ticker ? String(node.ticker) : ""
+      ticker: node.ticker ? String(node.ticker) : "",
+      market: node.market ? String(node.market) : ""
     });
   }
 
   if (!nodeMap.has(centerEntity)) {
-    nodeMap.set(centerEntity, { id: centerEntity, label: centerEntity, type: "target", ticker: "" });
+    nodeMap.set(centerEntity, { id: centerEntity, label: centerEntity, type: "target", ticker: "", market: "" });
   }
 
   const normalizedEdges = [];
@@ -72,9 +110,10 @@ function normalizeGraph(raw, centerEntity) {
     normalizedEdges.push({
       source,
       target,
-      relation: String(edge.relation || "related"),
-      relationCn: String(edge.relationCn || edge.relation_cn || edge.relation || "相关"),
+      relation: String(edge.relation || "upstream_dependency"),
+      relationCn: String(edge.relationCn || edge.relation_cn || "深层关联"),
       summary: String(edge.summary || edge.summary_cn || ""),
+      depth: Number.isFinite(edge.depth) ? edge.depth : undefined,
       confidence: Number.isFinite(edge.confidence) ? edge.confidence : undefined
     });
   }
@@ -82,71 +121,10 @@ function normalizeGraph(raw, centerEntity) {
   return { nodes: [...nodeMap.values()], edges: normalizedEdges };
 }
 
-function ensureDeepSeekBaseUrl(url) {
-  const raw = String(url || "").trim().replace(/\/+$/, "");
-  if (!raw) return "https://api.deepseek.com/v1";
-  if (/\/v1$/i.test(raw)) return raw;
-  if (/^https?:\/\/api\.deepseek\.com$/i.test(raw)) return `${raw}/v1`;
-  return raw;
-}
-
-function getModelConfig(modelName, apiKey, apiBaseUrl) {
-  const model = String(modelName || "").trim().toLowerCase();
-  const inputKey = String(apiKey || "").trim();
-  const baseUrl = String(apiBaseUrl || "").trim();
-
-  const joinUrl = (base, suffix) => `${base.replace(/\/+$/, "")}/${suffix.replace(/^\/+/, "")}`;
-
-  if (model === "deepseek") {
-    const key = inputKey || DEEPSEEK_API_KEY;
-    if (!key) {
-      throw new Error("API Key is required (input key or DEEPSEEK_API_KEY env)");
-    }
-    const normalizedBase = ensureDeepSeekBaseUrl(baseUrl || DEFAULT_API_BASE_URL);
-    return {
-      endpoint: joinUrl(normalizedBase, "/chat/completions"),
-      payloadModel: "deepseek-chat",
-      headers: {
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/json"
-      }
-    };
-  }
-
-  throw new Error(`Unsupported model provider: ${modelName}`);
-}
-
-async function fetchGraphFromAI({ modelName, apiKey, apiBaseUrl, centerEntity, context }) {
-  const cfg = getModelConfig(modelName, apiKey, apiBaseUrl);
-
-  const systemPrompt = [
-    "你是股票产业关系图谱生成器。",
-    "仅返回严格 JSON，不要 markdown，不要额外解释。",
-    "围绕目标公司生成 1 跳关系图谱，偏重产业链、客户、竞争和资本关系。",
-    "每条边必须给中文关系名 relationCn 和中文简述 summary。",
-    "输出格式：",
-    "{",
-    '  "nodes":[{"id":"NVIDIA","label":"英伟达","type":"target","ticker":"NVDA"}],',
-    '  "edges":[{"source":"台积电","target":"英伟达","relation":"supplier","relationCn":"上游供应","summary":"为其代工 AI GPU 芯片","confidence":0.84}]',
-    "}",
-    "规则：",
-    "1) 节点 6-12 个，中心公司必须存在。",
-    "2) 节点 id 唯一、稳定，优先中文公司名（必要时可带英文简称）。",
-    "3) source/target 必须引用已有节点 id。",
-    "4) relation 用英文短词；relationCn 用中文（如 上游供应/下游客户/竞争对手/合作伙伴/股权投资）。",
-    "5) summary 用中文短句，12-28 字，尽量描述具体业务联系。",
-    "6) 有把握时给 confidence(0-1)，不确定可省略。"
-  ].join("\n");
-
-  const userPrompt = [
-    `目标公司: ${centerEntity}`,
-    context ? `补充上下文: ${context}` : "补充上下文: 无",
-    "请生成一份新的、可视化友好的关系图谱。"
-  ].join("\n");
-
+async function deepseekChatJSON(cfg, systemPrompt, userPrompt, temperature = 0.2) {
   const requestBody = {
     model: cfg.payloadModel,
-    temperature: 0.2,
+    temperature,
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt }
@@ -159,39 +137,211 @@ async function fetchGraphFromAI({ modelName, apiKey, apiBaseUrl, centerEntity, c
     headers: cfg.headers,
     body: JSON.stringify(requestBody)
   });
-
   if (!resp.ok) {
     const errorText = await resp.text();
     throw new Error(`Model API error ${resp.status}: ${errorText.slice(0, 500)}`);
   }
-
   const data = await resp.json();
   const content = data?.choices?.[0]?.message?.content;
-  if (!content || typeof content !== "string") {
-    throw new Error("Model API returned empty content");
-  }
+  if (!content || typeof content !== "string") throw new Error("Model API returned empty content");
+  const parsed = safeJsonParse(content);
+  if (!parsed) throw new Error("Model output is not valid JSON");
+  return parsed;
+}
 
-  let parsed;
+async function fetchGraphFromAI({ modelName, apiKey, apiBaseUrl, centerEntity }) {
+  const cfg = getModelConfig(modelName, apiKey, apiBaseUrl);
+
+  const systemPrompt = [
+    "你是股票深层垄断产业链图谱生成器。",
+    "只返回 JSON，不要 markdown，不要解释。",
+    "必须严格执行思考链：",
+    "【标的主营业务 -> 核心生产环节 -> 不可替代关键物料/设备/工艺 -> 全球寡头垄断环节 -> 细分冷门上游标的（含A股+海外）】",
+    "禁止表层关系（竞争对手、直接下游客户、一级经销商）作为主干。",
+    "必须向上追溯 2~4 级隐藏上游节点。",
+    "节点必须符合：供给刚性、寡头垄断、不可替代、冷门特征。",
+    "每条边 relationCn 必须是以下四类之一：",
+    "刚需垄断 / 技术壁垒 / 国产替代 / 缺货催化",
+    "输出结构：",
+    "{",
+    '  "nodes":[{"id":"台积电","label":"台积电","type":"company","ticker":"TSM","market":"US"}],',
+    '  "edges":[{"source":"高端光刻胶树脂","target":"台积电","relation":"tech_barrier","relationCn":"技术壁垒","summary":"EUV光刻胶核心原料，工艺窗口窄且认证周期长","depth":2,"confidence":0.8}]',
+    "}",
+    "要求：",
+    "1) 节点 10~18 个，深层上游节点占比 >= 60%。",
+    "2) 必须包含 2~4 级 upstream depth（edge.depth 标记层级）。",
+    "3) summary 用中文 14~34 字，写清垄断与约束原因。",
+    "4) 优先给上市公司 ticker（A股用6位代码，海外用交易代码）。"
+  ].join("\n");
+
+  const userPrompt = [`目标公司: ${centerEntity}`, "请按规则输出完整深层垄断关系图谱。"].join("\n");
+
+  const raw = await deepseekChatJSON(cfg, systemPrompt, userPrompt, 0.15);
+  return normalizeGraph(raw, centerEntity);
+}
+
+function weekReturnColor(weeklyReturnPct) {
+  if (weeklyReturnPct == null || Number.isNaN(weeklyReturnPct)) return null;
+  if (weeklyReturnPct >= 10) return "#FF0000";
+  if (weeklyReturnPct >= 5) return "#FF4444";
+  if (weeklyReturnPct >= 2) return "#FF8888";
+  if (weeklyReturnPct >= 0) return "#FFBBBB";
+  if (weeklyReturnPct > -2) return "#88FF88";
+  if (weeklyReturnPct > -5) return "#44FF44";
+  if (weeklyReturnPct > -10) return "#00CC00";
+  return "#00FF00";
+}
+
+function formatMoneyCN(amount) {
+  if (amount == null || Number.isNaN(amount)) return "-";
+  const abs = Math.abs(amount);
+  if (abs >= 1e8) return `${(amount / 1e8).toFixed(2)}亿`;
+  if (abs >= 1e4) return `${(amount / 1e4).toFixed(2)}万`;
+  return amount.toFixed(0);
+}
+
+async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 12000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    parsed = JSON.parse(content);
-  } catch (e) {
-    throw new Error("Model output is not valid JSON");
+    const resp = await fetch(url, { ...options, signal: ctrl.signal });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      throw new Error(`HTTP ${resp.status} ${txt.slice(0, 200)}`);
+    }
+    return await resp.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function normalizeTicker(code) {
+  const raw = String(code || "").trim().toUpperCase();
+  if (!raw) return "";
+  if (/^\d{6}$/.test(raw)) return raw;
+  return raw;
+}
+
+async function fetchWeeklyAndFundData(nodes) {
+  if (!FINANCE_API_BASE_URL) return {};
+  const out = {};
+  const unique = new Set();
+  for (const n of nodes || []) {
+    const tk = normalizeTicker(n.ticker);
+    if (tk) unique.add(tk);
   }
 
-  return normalizeGraph(parsed, centerEntity);
+  for (const ticker of unique) {
+    try {
+      const url = joinUrl(FINANCE_API_BASE_URL, `/enrich?ticker=${encodeURIComponent(ticker)}`);
+      const data = await fetchJsonWithTimeout(
+        url,
+        {
+          headers: FINANCE_API_KEY ? { Authorization: `Bearer ${FINANCE_API_KEY}` } : {}
+        },
+        10000
+      );
+      const weeklyReturnPct = Number.isFinite(data?.weeklyReturnPct) ? data.weeklyReturnPct : null;
+      const mainFundNetInflow = Number.isFinite(data?.mainFundNetInflow) ? data.mainFundNetInflow : null;
+      const dataWeek = data?.dataWeek === "last_week" ? "last_week" : "this_week";
+      out[ticker] = {
+        weeklyReturnPct,
+        mainFundNetInflow,
+        dataWeek,
+        color: weekReturnColor(weeklyReturnPct),
+        weeklyReturnText:
+          weeklyReturnPct == null ? "-" : `${weeklyReturnPct >= 0 ? "+" : ""}${weeklyReturnPct.toFixed(2)}%`,
+        mainFundText: formatMoneyCN(mainFundNetInflow)
+      };
+    } catch {
+      out[ticker] = null;
+    }
+  }
+  return out;
+}
+
+function fallbackNews(centerEntity) {
+  return [
+    {
+      title: `${centerEntity} 产业链近期观察`,
+      url: "",
+      source: "系统占位",
+      publishedAt: ""
+    }
+  ];
+}
+
+async function fetchNews(centerEntity) {
+  if (!NEWS_API_BASE_URL) return fallbackNews(centerEntity);
+  try {
+    const url = joinUrl(NEWS_API_BASE_URL, `/news?q=${encodeURIComponent(centerEntity)}&limit=8`);
+    const data = await fetchJsonWithTimeout(
+      url,
+      { headers: NEWS_API_KEY ? { Authorization: `Bearer ${NEWS_API_KEY}` } : {} },
+      12000
+    );
+    const items = Array.isArray(data?.items) ? data.items : [];
+    return items
+      .map((it) => ({
+        title: String(it.title || "").trim(),
+        url: String(it.url || "").trim(),
+        source: String(it.source || "").trim(),
+        publishedAt: String(it.publishedAt || "").trim()
+      }))
+      .filter((it) => it.title)
+      .slice(0, 8);
+  } catch {
+    return fallbackNews(centerEntity);
+  }
+}
+
+async function summarizeNewsWithAI({ modelName, apiKey, apiBaseUrl, centerEntity, newsItems }) {
+  if (!Array.isArray(newsItems) || !newsItems.length) {
+    return "暂无可用新闻数据，建议稍后刷新。";
+  }
+  const cfg = getModelConfig(modelName, apiKey, apiBaseUrl);
+  const systemPrompt = [
+    "你是股票新闻解读助手。",
+    "仅输出 JSON：{\"summary\":\"...\"}",
+    "要求：",
+    "1) 80~160字中文",
+    "2) 只做信息归纳，不给投资建议",
+    "3) 点出产业链可能影响方向（供给、价格、订单、资本开支）"
+  ].join("\n");
+  const userPrompt = [
+    `标的: ${centerEntity}`,
+    "新闻列表:",
+    ...newsItems.map((n, i) => `${i + 1}. ${n.title} | ${n.source} | ${n.publishedAt}`)
+  ].join("\n");
+  const parsed = await deepseekChatJSON(cfg, systemPrompt, userPrompt, 0.2);
+  return String(parsed?.summary || "").trim() || "暂无解读。";
+}
+
+async function buildEnrichPayload({ modelName, apiKey, apiBaseUrl, centerEntity, nodes }) {
+  const [financeMap, newsItems] = await Promise.all([fetchWeeklyAndFundData(nodes), fetchNews(centerEntity)]);
+  const commentary = await summarizeNewsWithAI({
+    modelName,
+    apiKey,
+    apiBaseUrl,
+    centerEntity,
+    newsItems
+  }).catch(() => "新闻解读暂不可用。");
+  return {
+    nodeMetrics: financeMap,
+    news: newsItems,
+    commentary
+  };
 }
 
 function serveStatic(pathname, res) {
   const reqPath = pathname === "/" ? "/public/index.html" : pathname;
   const safePath = path.normalize(reqPath).replace(/^(\.\.[/\\])+/, "");
   const filePath = path.join(process.cwd(), safePath);
-
   if (!filePath.startsWith(process.cwd())) {
     res.writeHead(403);
     res.end("Forbidden");
     return;
   }
-
   fs.readFile(filePath, (err, data) => {
     if (err) {
       res.writeHead(404);
@@ -213,28 +363,45 @@ const server = http.createServer(async (req, res) => {
     sendJson(res, 200, {
       defaultProvider: DEFAULT_PROVIDER,
       defaultApiBaseUrl: DEFAULT_API_BASE_URL,
-      serverKeyConfigured: Boolean(DEEPSEEK_API_KEY)
+      serverKeyConfigured: Boolean(DEEPSEEK_API_KEY),
+      financeEnrichConfigured: Boolean(FINANCE_API_BASE_URL),
+      newsConfigured: Boolean(NEWS_API_BASE_URL)
     });
     return;
   }
 
   if (req.method === "POST" && pathname === "/api/graph") {
     try {
-      const raw = await readBody(req);
-      const body = JSON.parse(raw || "{}");
+      const body = safeJsonParse(await readBody(req), {}) || {};
       const centerEntity = String(body.centerEntity || "").trim();
-      if (!centerEntity) {
-        sendJson(res, 400, { error: "centerEntity is required" });
-        return;
-      }
+      if (!centerEntity) return sendJson(res, 400, { error: "centerEntity is required" });
       const graph = await fetchGraphFromAI({
         modelName: body.modelName,
         apiKey: body.apiKey,
         apiBaseUrl: body.apiBaseUrl,
-        centerEntity,
-        context: body.context || ""
+        centerEntity
       });
       sendJson(res, 200, { graph });
+    } catch (err) {
+      sendJson(res, 500, { error: err.message || "Unknown error" });
+    }
+    return;
+  }
+
+  if (req.method === "POST" && pathname === "/api/enrich") {
+    try {
+      const body = safeJsonParse(await readBody(req), {}) || {};
+      const centerEntity = String(body.centerEntity || "").trim();
+      if (!centerEntity) return sendJson(res, 400, { error: "centerEntity is required" });
+      const nodes = Array.isArray(body.nodes) ? body.nodes : [];
+      const enrich = await buildEnrichPayload({
+        modelName: body.modelName,
+        apiKey: body.apiKey,
+        apiBaseUrl: body.apiBaseUrl,
+        centerEntity,
+        nodes
+      });
+      sendJson(res, 200, enrich);
     } catch (err) {
       sendJson(res, 500, { error: err.message || "Unknown error" });
     }

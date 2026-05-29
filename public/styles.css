@@ -1,12 +1,12 @@
 :root {
-  --bg: #0b1320;
-  --panel: #101b2d;
-  --panel-soft: #182741;
+  --bg: #0a111f;
+  --panel: #111b2f;
+  --panel-soft: #1b2942;
   --text: #e8eefc;
   --subtext: #a8bbdd;
   --accent: #4fd1c5;
   --danger: #ff7b7b;
-  --edge: #49638e;
+  --edge: #5578ad;
 }
 
 * {
@@ -31,28 +31,28 @@ body {
 }
 
 .panel {
-  padding: 20px;
-  background: linear-gradient(180deg, rgba(16, 27, 45, 0.95), rgba(11, 19, 32, 0.95));
+  padding: 18px;
+  background: linear-gradient(180deg, rgba(16, 27, 45, 0.96), rgba(11, 19, 32, 0.96));
   border-right: 1px solid rgba(130, 170, 230, 0.2);
   overflow-y: auto;
 }
 
 .panel h1 {
   margin: 0 0 8px;
-  font-size: 22px;
+  font-size: 20px;
 }
 
 .hint {
-  margin: 0 0 16px;
+  margin: 0 0 14px;
   color: var(--subtext);
-  font-size: 13px;
-  line-height: 1.6;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 label {
   display: block;
-  margin: 12px 0 6px;
-  font-size: 13px;
+  margin: 10px 0 5px;
+  font-size: 12px;
   color: #c9d6f4;
 }
 
@@ -60,9 +60,9 @@ input,
 select,
 button {
   width: 100%;
-  border: 1px solid rgba(144, 176, 228, 0.3);
+  border: 1px solid rgba(144, 176, 228, 0.32);
   border-radius: 10px;
-  padding: 10px 12px;
+  padding: 10px 11px;
   font-size: 14px;
 }
 
@@ -78,8 +78,12 @@ select:focus {
   border-color: var(--accent);
 }
 
+.actions {
+  margin-top: 8px;
+}
+
 button {
-  margin-top: 12px;
+  margin-top: 8px;
   background: linear-gradient(120deg, #2d8cf0, #35c0a6);
   color: #fff;
   cursor: pointer;
@@ -95,26 +99,12 @@ button:disabled {
   cursor: not-allowed;
 }
 
-.tips {
-  margin-top: 16px;
-  padding: 12px;
-  border-radius: 12px;
-  background: rgba(26, 43, 72, 0.55);
-  font-size: 13px;
-  color: var(--subtext);
-}
-
-.tips ul {
-  margin: 6px 0 0;
-  padding-left: 18px;
-}
-
 .status {
-  margin-top: 16px;
+  margin-top: 12px;
   min-height: 42px;
   padding: 10px 12px;
   border-radius: 10px;
-  background: rgba(30, 45, 74, 0.8);
+  background: rgba(30, 45, 74, 0.82);
   color: #cae3ff;
   font-size: 13px;
 }
@@ -123,9 +113,15 @@ button:disabled {
   color: var(--danger);
 }
 
-.graph-wrap {
-  position: relative;
+.content {
   min-width: 0;
+  display: grid;
+  grid-template-rows: 1fr 240px;
+}
+
+.graph-wrap {
+  min-width: 0;
+  border-bottom: 1px solid rgba(130, 170, 230, 0.2);
 }
 
 #graphSvg {
@@ -144,18 +140,19 @@ button:disabled {
 .edge {
   stroke: var(--edge);
   stroke-width: 1.2;
-  opacity: 0.85;
+  opacity: 0.86;
 }
 
 .edge-label {
   fill: #9ec3ff;
   font-size: 11px;
   pointer-events: none;
+  text-shadow: 0 0 6px rgba(8, 15, 30, 0.95);
 }
 
 .node circle {
   stroke: #dbe8ff;
-  stroke-width: 1;
+  stroke-width: 1.1;
 }
 
 .node.target circle {
@@ -164,10 +161,6 @@ button:disabled {
 
 .node.company circle {
   fill: #3ea3ff;
-}
-
-.node.index circle {
-  fill: #7cc576;
 }
 
 .node text {
@@ -182,7 +175,91 @@ button:disabled {
   stroke-width: 2;
 }
 
-@media (max-width: 960px) {
+.node-metric {
+  font-size: 10px;
+  pointer-events: none;
+}
+
+.metric-up {
+  fill: #ff7070;
+}
+
+.metric-down {
+  fill: #63d881;
+}
+
+.metric-inflow {
+  fill: #ffb660;
+}
+
+.metric-outflow {
+  fill: #5ad1db;
+}
+
+.data-dot-this {
+  fill: #2fd267;
+}
+
+.data-dot-last {
+  fill: #8b95ad;
+}
+
+.news-wrap {
+  padding: 12px 14px;
+  overflow-y: auto;
+  background: rgba(14, 21, 37, 0.92);
+}
+
+.news-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.news-header h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.news-tag {
+  font-size: 11px;
+  color: #9ec3ff;
+}
+
+.commentary {
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(30, 45, 74, 0.7);
+  font-size: 13px;
+  color: #d9e6ff;
+  line-height: 1.6;
+}
+
+.news-list {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.news-list li {
+  padding: 8px 0;
+  border-bottom: 1px dashed rgba(120, 150, 210, 0.25);
+  font-size: 13px;
+}
+
+.news-list a {
+  color: #b9d8ff;
+  text-decoration: none;
+}
+
+.news-meta {
+  margin-top: 3px;
+  font-size: 11px;
+  color: #8fa9d1;
+}
+
+@media (max-width: 980px) {
   .app-shell {
     grid-template-columns: 1fr;
     grid-template-rows: auto 1fr;
@@ -193,15 +270,15 @@ button:disabled {
     border-bottom: 1px solid rgba(130, 170, 230, 0.2);
   }
 
-  .edge-label {
-    font-size: 12px;
-  }
-
-  .node text {
-    font-size: 13px;
+  .content {
+    grid-template-rows: 1fr 280px;
   }
 
   button {
     min-height: 42px;
+  }
+
+  .node-metric {
+    font-size: 11px;
   }
 }

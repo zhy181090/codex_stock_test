@@ -3,14 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>股票关系图谱</title>
+    <title>股票深层垄断关系图谱</title>
     <link rel="stylesheet" href="/public/styles.css" />
   </head>
   <body>
     <div class="app-shell">
       <aside class="panel">
-        <h1>股票关系图谱</h1>
-        <p class="hint">输入股票名称或代码，生成单中心关系网。点击节点将切换到该公司新图谱。</p>
+        <h1>股票深层垄断关系图谱</h1>
+        <p class="hint">聚焦 2~4 级隐藏上游，输出刚需垄断/技术壁垒/国产替代/缺货催化四类关系。</p>
 
         <label>模型提供商</label>
         <select id="modelName">
@@ -33,27 +33,30 @@
           <button id="clearBtn" class="secondary">清空画布</button>
         </div>
 
-        <div class="tips">
-          <strong>触控说明</strong>
-          <ul>
-            <li>单指拖动画布</li>
-            <li>双指捏合缩放</li>
-            <li>点按公司节点切换中心公司</li>
-          </ul>
-        </div>
-
         <div id="status" class="status">等待输入...</div>
       </aside>
 
-      <main class="graph-wrap">
-        <svg id="graphSvg" viewBox="0 0 1400 900">
-          <g id="viewport">
-            <g id="edges"></g>
-            <g id="edgeLabels"></g>
-            <g id="nodes"></g>
-          </g>
-        </svg>
-      </main>
+      <section class="content">
+        <main class="graph-wrap">
+          <svg id="graphSvg" viewBox="0 0 1600 980">
+            <defs id="lineDefs"></defs>
+            <g id="viewport">
+              <g id="edges"></g>
+              <g id="edgeLabels"></g>
+              <g id="nodes"></g>
+            </g>
+          </svg>
+        </main>
+
+        <section class="news-wrap">
+          <div class="news-header">
+            <h2>近期新闻与AI解读</h2>
+            <span id="newsTag" class="news-tag">未加载</span>
+          </div>
+          <div id="newsCommentary" class="commentary">暂无解读</div>
+          <ul id="newsList" class="news-list"></ul>
+        </section>
+      </section>
     </div>
 
     <script src="/public/app.js"></script>

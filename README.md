@@ -1,43 +1,79 @@
-# 股票关系图谱（移动端优化版）
+# 股票深层垄断关系图谱
 
-主要特性：
+本版本能力：
 
-- 中文关系展示：`关系中文名 + 中文简述`
-- 单中心视图：点击节点后，清空旧图并以该节点重建新图
-- 历史回退：可返回上一步中心公司
-- 本地缓存：同一公司短期内优先读缓存，减少 token 消耗
-- 手动刷新：需要最新关系时可强制重拉
-- 触控优化：单指拖动、双指捏合缩放、滚轮缩放
+- 深层垄断链路挖掘（2~4级上游隐藏节点）
+- 关系类型固定为：`刚需垄断 / 技术壁垒 / 国产替代 / 缺货催化`
+- 关系文本沿连线方向显示，减少堆叠
+- 单中心图谱切换 + 回退 + 本地缓存
+- 节点周涨跌染色、主力净流入两行标注、周数据状态点
+- 图谱下方展示近期新闻与 AI 简析
 
-## 本地运行
-
-要求：Node.js 18+
+## 启动
 
 ```bash
 node server.js
 ```
 
-访问：[http://localhost:3000](http://localhost:3000)
+访问 `http://localhost:3000`
 
-## 云端部署（Render）
+## 环境变量
 
-项目可直接部署到 Render，手机可长期访问公网链接。
+核心（必须其一：前端输入 key 或服务端变量）：
 
-环境变量：
-
-- `DEEPSEEK_API_KEY`（必填，建议仅服务端保存）
+- `DEEPSEEK_API_KEY`
 - `DEFAULT_PROVIDER=deepseek`
 - `DEFAULT_API_BASE_URL=https://api.deepseek.com/v1`
 
-## 缓存策略
+增强数据（可选，建议你接自己的聚合服务）：
 
-- 缓存键：`中心公司 + 模型 + API Base URL`
-- TTL：6 小时
-- 上限：30 个图谱（超出按最近使用保留）
+- `FINANCE_API_BASE_URL`：提供 `GET /enrich?ticker=...`
+- `FINANCE_API_KEY`：可选鉴权
+- `NEWS_API_BASE_URL`：提供 `GET /news?q=...&limit=8`
+- `NEWS_API_KEY`：可选鉴权
 
-## 接口
+## 增强数据接口约定
 
-- `GET /api/config`：默认配置与密钥状态
-- `POST /api/graph`：生成图谱
-  - 入参：`modelName`、`apiBaseUrl`、`apiKey`、`centerEntity`
-  - 出参：`{ graph: { nodes, edges } }`
+### 1) 金融增强接口
+
+`GET {FINANCE_API_BASE_URL}/enrich?ticker=000001`
+
+返回示例：
+
+```json
+{
+  "weeklyReturnPct": 5.2,
+  "mainFundNetInflow": 135000000,
+  "dataWeek": "this_week"
+}
+```
+
+### 2) 新闻接口
+
+`GET {NEWS_API_BASE_URL}/news?q=英伟达&limit=8`
+
+返回示例：
+
+```json
+{
+  "items": [
+    {
+      "title": "标题",
+      "url": "https://...",
+      "source": "来源",
+      "publishedAt": "2026-05-29"
+    }
+  ]
+}
+```
+
+## 染色规则
+
+- `>= +10%` `#FF0000`
+- `+5% ~ +9.99%` `#FF4444`
+- `+2% ~ +4.99%` `#FF8888`
+- `0% ~ +1.99%` `#FFBBBB`
+- `-1.99% ~ 0%` `#88FF88`
+- `-4.99% ~ -2%` `#44FF44`
+- `-9.99% ~ -5%` `#00CC00`
+- `<= -10%` `#00FF00`

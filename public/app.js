@@ -1,4 +1,4 @@
-const CACHE_KEY = "stock_graph_cache_v1";
+const CACHE_KEY = "stock_graph_cache_v2";
 const CONFIG_KEY = "stock_graph_config";
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 30;
@@ -15,7 +15,8 @@ const state = {
   serverKeyConfigured: false,
   cache: new Map(),
   pointers: new Map(),
-  gesture: null
+  gesture: null,
+  nodeMetrics: {}
 };
 
 const ui = {
@@ -29,10 +30,14 @@ const ui = {
   clearBtn: document.getElementById("clearBtn"),
   status: document.getElementById("status"),
   svg: document.getElementById("graphSvg"),
+  defs: document.getElementById("lineDefs"),
   viewport: document.getElementById("viewport"),
   edges: document.getElementById("edges"),
   edgeLabels: document.getElementById("edgeLabels"),
-  nodes: document.getElementById("nodes")
+  nodes: document.getElementById("nodes"),
+  newsList: document.getElementById("newsList"),
+  newsTag: document.getElementById("newsTag"),
+  newsCommentary: document.getElementById("newsCommentary")
 };
 
 function setStatus(text, isError = false) {
@@ -72,9 +77,7 @@ function loadConfigToForm(serverCfg) {
 async function loadServerConfig() {
   const resp = await fetch("/api/config");
   const data = await resp.json();
-  if (!resp.ok) {
-    throw new Error(data.error || "加载服务器配置失败");
-  }
+  if (!resp.ok) throw new Error(data.error || "加载服务器配置失败");
   return data;
 }
 
@@ -103,7 +106,7 @@ function persistCache() {
   localStorage.setItem(CACHE_KEY, JSON.stringify(arr));
 }
 
-function getCachedGraph(centerEntity) {
+function getCachedPayload(centerEntity) {
   const key = graphCacheKey(centerEntity);
   const item = state.cache.get(key);
   if (!item) return null;
@@ -115,13 +118,17 @@ function getCachedGraph(centerEntity) {
   item.ts = Date.now();
   state.cache.set(key, item);
   persistCache();
-  return item.graph;
+  return item.payload;
 }
 
-function setCachedGraph(centerEntity, graph) {
+function setCachedPayload(centerEntity, payload) {
   const key = graphCacheKey(centerEntity);
-  state.cache.set(key, { key, ts: Date.now(), graph });
+  state.cache.set(key, { key, ts: Date.now(), payload });
   persistCache();
+}
+
+function clearGroup(el) {
+  while (el.firstChild) el.removeChild(el.firstChild);
 }
 
 function resetViewport() {
@@ -129,24 +136,33 @@ function resetViewport() {
   applyViewport();
 }
 
-function setGraph(centerEntity, graph) {
+function nodeBaseColor(node, metric) {
+  if (metric && metric.color) return metric.color;
+  if (node.type === "target") return "#ffb347";
+  return "#3ea3ff";
+}
+
+function setGraph(centerEntity, graph, metrics) {
   state.nodes.clear();
   state.edges = [];
   state.positions.clear();
   state.activeNodeId = centerEntity;
   state.currentCenter = centerEntity;
+  state.nodeMetrics = metrics || {};
 
   for (const node of graph.nodes || []) {
     const id = toId(node.id);
     if (!id) continue;
-    state.nodes.set(id, {
+    const normalized = {
       id,
       label: node.label || id,
       type: node.type || "company",
-      ticker: node.ticker || ""
-    });
+      ticker: node.ticker || "",
+      market: node.market || ""
+    };
+    state.nodes.set(id, normalized);
     if (!state.positions.has(id)) {
-      state.positions.set(id, { x: Math.random() * 1200 + 100, y: Math.random() * 700 + 100 });
+      state.positions.set(id, { x: Math.random() * 1320 + 120, y: Math.random() * 760 + 100 });
     }
   }
 
@@ -155,26 +171,27 @@ function setGraph(centerEntity, graph) {
     const source = toId(edge.source);
     const target = toId(edge.target);
     if (!source || !target) continue;
-    const key = `${source}|${target}|${edge.relation || "related"}|${edge.summary || ""}`;
+    const key = `${source}|${target}|${edge.relation || "related"}|${edge.summary || ""}|${edge.depth || ""}`;
     if (edgeSet.has(key)) continue;
     edgeSet.add(key);
     state.edges.push({
       source,
       target,
-      relation: edge.relation || "related",
-      relationCn: edge.relationCn || "相关",
+      relation: edge.relation || "upstream_dependency",
+      relationCn: edge.relationCn || "深层关联",
       summary: edge.summary || "",
+      depth: Number.isFinite(edge.depth) ? edge.depth : null,
       confidence: typeof edge.confidence === "number" ? edge.confidence : null
     });
   }
 }
 
-function layout(iterations = 140) {
+function layout(iterations = 160) {
   const nodes = [...state.nodes.values()];
   if (!nodes.length) return;
 
-  const width = 1400;
-  const height = 900;
+  const width = 1600;
+  const height = 980;
   const area = width * height;
   const k = Math.sqrt(area / nodes.length);
 
@@ -216,72 +233,134 @@ function layout(iterations = 140) {
       disp.get(edge.target).y += dy * force;
     }
 
-    const temp = Math.max(1, 40 * (1 - step / iterations));
+    const temp = Math.max(1, 50 * (1 - step / iterations));
     for (const n of nodes) {
       const p = state.positions.get(n.id);
       const d = disp.get(n.id);
       const dist = Math.hypot(d.x, d.y) || 0.01;
       p.x += (d.x / dist) * Math.min(dist, temp);
       p.y += (d.y / dist) * Math.min(dist, temp);
-      p.x = Math.min(width - 50, Math.max(50, p.x));
-      p.y = Math.min(height - 50, Math.max(50, p.y));
+      p.x = Math.min(width - 60, Math.max(60, p.x));
+      p.y = Math.min(height - 60, Math.max(60, p.y));
     }
   }
 }
 
-function clearGroup(el) {
-  while (el.firstChild) el.removeChild(el.firstChild);
+function edgePathId(index) {
+  return `edge-path-${index}`;
+}
+
+function relationLabel(edge) {
+  const depthText = edge.depth ? `L${edge.depth}` : "L?";
+  const summary = edge.summary ? ` | ${edge.summary}` : "";
+  return `${depthText} ${edge.relationCn}${summary}`;
+}
+
+function renderNews(news, commentary) {
+  ui.newsCommentary.textContent = commentary || "暂无解读";
+  while (ui.newsList.firstChild) ui.newsList.removeChild(ui.newsList.firstChild);
+  for (const item of news || []) {
+    const li = document.createElement("li");
+    const a = document.createElement("a");
+    a.textContent = item.title || "未命名新闻";
+    a.href = item.url || "#";
+    a.target = "_blank";
+    a.rel = "noreferrer noopener";
+    li.appendChild(a);
+    const meta = document.createElement("div");
+    meta.className = "news-meta";
+    meta.textContent = `${item.source || "未知来源"} ${item.publishedAt ? `| ${item.publishedAt}` : ""}`;
+    li.appendChild(meta);
+    ui.newsList.appendChild(li);
+  }
+  ui.newsTag.textContent = `共 ${news?.length || 0} 条`;
 }
 
 function render() {
+  clearGroup(ui.defs);
   clearGroup(ui.edges);
   clearGroup(ui.edgeLabels);
   clearGroup(ui.nodes);
 
-  for (const e of state.edges) {
+  state.edges.forEach((e, i) => {
     const sp = state.positions.get(e.source);
     const tp = state.positions.get(e.target);
-    if (!sp || !tp) continue;
+    if (!sp || !tp) return;
 
-    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    line.setAttribute("x1", sp.x);
-    line.setAttribute("y1", sp.y);
-    line.setAttribute("x2", tp.x);
-    line.setAttribute("y2", tp.y);
-    line.setAttribute("class", "edge");
-    ui.edges.appendChild(line);
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    const pathId = edgePathId(i);
+    const curveSign = i % 2 === 0 ? 1 : -1;
+    const mx = (sp.x + tp.x) / 2;
+    const my = (sp.y + tp.y) / 2;
+    const dx = tp.x - sp.x;
+    const dy = tp.y - sp.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = (-dy / len) * (16 + (i % 3) * 8) * curveSign;
+    const ny = (dx / len) * (16 + (i % 3) * 8) * curveSign;
+    const d = `M ${sp.x} ${sp.y} Q ${mx + nx} ${my + ny} ${tp.x} ${tp.y}`;
 
-    const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
-    label.setAttribute("x", (sp.x + tp.x) / 2);
-    label.setAttribute("y", (sp.y + tp.y) / 2 - 6);
-    label.setAttribute("class", "edge-label");
-    const shortSummary = e.summary ? ` | ${e.summary}` : "";
-    label.textContent = `${e.relationCn}${shortSummary}`;
-    ui.edgeLabels.appendChild(label);
-  }
+    path.setAttribute("id", pathId);
+    path.setAttribute("d", d);
+    path.setAttribute("fill", "none");
+    path.setAttribute("class", "edge");
+    ui.edges.appendChild(path);
+
+    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    text.setAttribute("class", "edge-label");
+    const textPath = document.createElementNS("http://www.w3.org/2000/svg", "textPath");
+    textPath.setAttributeNS("http://www.w3.org/1999/xlink", "href", `#${pathId}`);
+    textPath.setAttribute("startOffset", `${40 + (i % 4) * 8}%`);
+    textPath.textContent = relationLabel(e);
+    text.appendChild(textPath);
+    ui.edgeLabels.appendChild(text);
+  });
 
   for (const node of state.nodes.values()) {
     const p = state.positions.get(node.id);
     if (!p) continue;
+    const metric = state.nodeMetrics[node.ticker] || null;
 
     const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
     g.setAttribute(
       "class",
-      `node ${node.type === "target" ? "target" : node.type === "index" ? "index" : "company"} ${
-        state.activeNodeId === node.id ? "active" : ""
-      }`
+      `node ${node.type === "target" ? "target" : "company"} ${state.activeNodeId === node.id ? "active" : ""}`
     );
     g.setAttribute("transform", `translate(${p.x}, ${p.y})`);
     g.dataset.nodeId = node.id;
 
     const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-    circle.setAttribute("r", node.type === "target" ? "20" : "16");
+    circle.setAttribute("r", node.type === "target" ? "21" : "17");
+    circle.setAttribute("fill", nodeBaseColor(node, metric));
     g.appendChild(circle);
 
     const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-    text.setAttribute("dy", node.type === "target" ? "35" : "30");
+    text.setAttribute("dy", node.type === "target" ? "36" : "31");
     text.textContent = node.label.length > 16 ? `${node.label.slice(0, 16)}...` : node.label;
     g.appendChild(text);
+
+    if (metric) {
+      const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      dot.setAttribute("r", "4");
+      dot.setAttribute("cx", "14");
+      dot.setAttribute("cy", "-14");
+      dot.setAttribute("class", metric.dataWeek === "last_week" ? "data-dot-last" : "data-dot-this");
+      g.appendChild(dot);
+
+      const l1 = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      l1.setAttribute("class", `node-metric ${String(metric.weeklyReturnText || "").startsWith("-") ? "metric-down" : "metric-up"}`);
+      l1.setAttribute("x", "24");
+      l1.setAttribute("y", "-2");
+      l1.textContent = `周涨跌: ${metric.weeklyReturnText || "-"}`;
+      g.appendChild(l1);
+
+      const fundNegative = Number(metric.mainFundNetInflow || 0) < 0;
+      const l2 = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      l2.setAttribute("class", `node-metric ${fundNegative ? "metric-outflow" : "metric-inflow"}`);
+      l2.setAttribute("x", "24");
+      l2.setAttribute("y", "11");
+      l2.textContent = `主力净流入: ${metric.mainFundText || "-"}`;
+      g.appendChild(l2);
+    }
 
     g.addEventListener("click", async (evt) => {
       evt.stopPropagation();
@@ -290,10 +369,8 @@ function render() {
       if (state.currentCenter) state.history.push(state.currentCenter);
       await showCenterGraph(nextCenter, { useCache: true, resetView: true, forceRefresh: false });
     });
-
     ui.nodes.appendChild(g);
   }
-
   ui.backBtn.disabled = state.history.length === 0;
 }
 
@@ -303,21 +380,34 @@ async function requestGraph(centerEntity) {
     modelName: ui.modelName.value,
     apiBaseUrl: ui.apiBaseUrl.value.trim(),
     apiKey: ui.apiKey.value.trim(),
-    centerEntity,
-    context: ""
+    centerEntity
   };
-
   const resp = await fetch("/api/graph", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   });
-
   const data = await resp.json();
-  if (!resp.ok) {
-    throw new Error(data.error || "请求失败");
-  }
+  if (!resp.ok) throw new Error(data.error || "请求图谱失败");
   return data.graph;
+}
+
+async function requestEnrich(centerEntity, nodes) {
+  const payload = {
+    modelName: ui.modelName.value,
+    apiBaseUrl: ui.apiBaseUrl.value.trim(),
+    apiKey: ui.apiKey.value.trim(),
+    centerEntity,
+    nodes
+  };
+  const resp = await fetch("/api/enrich", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data.error || "请求增强数据失败");
+  return data;
 }
 
 async function showCenterGraph(centerEntity, options = {}) {
@@ -333,27 +423,29 @@ async function showCenterGraph(centerEntity, options = {}) {
 
   ui.buildBtn.disabled = true;
   ui.refreshBtn.disabled = true;
-  setStatus(`正在加载 ${center} 关系图谱...`);
+  setStatus(`正在加载 ${center} 深层关系图谱...`);
 
   try {
-    let graph = null;
-    if (useCache && !forceRefresh) {
-      graph = getCachedGraph(center);
-    }
-    if (!graph) {
-      graph = await requestGraph(center);
-      setCachedGraph(center, graph);
-      setStatus(`已获取 ${center} 最新图谱。`);
+    let payload = null;
+    if (useCache && !forceRefresh) payload = getCachedPayload(center);
+
+    if (!payload) {
+      const graph = await requestGraph(center);
+      const enrich = await requestEnrich(center, graph.nodes || []);
+      payload = { graph, enrich };
+      setCachedPayload(center, payload);
+      setStatus(`已获取 ${center} 最新深层图谱。`);
     } else {
       setStatus(`已使用缓存：${center}。`);
     }
 
-    setGraph(center, graph);
-    layout(160);
+    setGraph(center, payload.graph, payload.enrich?.nodeMetrics || {});
+    layout(170);
     if (resetView) resetViewport();
     render();
+    renderNews(payload.enrich?.news || [], payload.enrich?.commentary || "");
     ui.centerEntity.value = center;
-    setStatus(`当前中心：${center}。点节点可切换到该公司新图谱。`);
+    setStatus(`当前中心：${center}。点击节点将重建该公司深层图谱。`);
   } catch (err) {
     setStatus(`加载失败: ${err.message}`, true);
   } finally {
@@ -393,8 +485,12 @@ function clearCanvas() {
   state.activeNodeId = "";
   state.currentCenter = "";
   state.history = [];
+  state.nodeMetrics = {};
   render();
   resetViewport();
+  ui.newsCommentary.textContent = "暂无解读";
+  ui.newsTag.textContent = "未加载";
+  while (ui.newsList.firstChild) ui.newsList.removeChild(ui.newsList.firstChild);
   setStatus("已清空画布。");
 }
 
@@ -416,7 +512,6 @@ function zoomAroundPoint(clientX, clientY, factor) {
   const oldScale = state.viewport.scale;
   const newScale = clampScale(oldScale * factor);
   if (newScale === oldScale) return;
-
   const p = svgPointFromClient(clientX, clientY);
   const worldX = (p.x - state.viewport.x) / oldScale;
   const worldY = (p.y - state.viewport.y) / oldScale;
@@ -431,8 +526,7 @@ function initWheelZoom() {
     "wheel",
     (e) => {
       e.preventDefault();
-      const factor = e.deltaY > 0 ? 0.92 : 1.08;
-      zoomAroundPoint(e.clientX, e.clientY, factor);
+      zoomAroundPoint(e.clientX, e.clientY, e.deltaY > 0 ? 0.92 : 1.08);
     },
     { passive: false }
   );
@@ -456,14 +550,10 @@ function initPointerGestures() {
     } else if (state.pointers.size === 2) {
       const pts = [...state.pointers.values()];
       const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1;
-      const cx = (pts[0].x + pts[1].x) / 2;
-      const cy = (pts[0].y + pts[1].y) / 2;
       state.gesture = {
         mode: "pinch",
         startDistance: dist,
         startScale: state.viewport.scale,
-        centerX: cx,
-        centerY: cy,
         originX: state.viewport.x,
         originY: state.viewport.y
       };
@@ -489,11 +579,11 @@ function initPointerGestures() {
     if (state.pointers.size >= 2) {
       const pts = [...state.pointers.values()];
       const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1;
-      const cx = (pts[0].x + pts[1].x) / 2;
-      const cy = (pts[0].y + pts[1].y) / 2;
+      const centerX = (pts[0].x + pts[1].x) / 2;
+      const centerY = (pts[0].y + pts[1].y) / 2;
       const factor = dist / (state.gesture.startDistance || dist);
       const targetScale = clampScale((state.gesture.startScale || 1) * factor);
-      const p = svgPointFromClient(cx, cy);
+      const p = svgPointFromClient(centerX, centerY);
       const worldX = (p.x - state.gesture.originX) / (state.gesture.startScale || 1);
       const worldY = (p.y - state.gesture.originY) / (state.gesture.startScale || 1);
       state.viewport.scale = targetScale;
