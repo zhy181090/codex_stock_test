@@ -1,4 +1,4 @@
-const CACHE_KEY = "stock_graph_cache_v3";
+const CACHE_KEY = "stock_graph_cache_v4";
 const CONFIG_KEY = "stock_graph_config";
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 30;

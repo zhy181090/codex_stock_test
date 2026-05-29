@@ -146,6 +146,13 @@ button:disabled {
   gap: 6px;
 }
 
+.legend-note {
+  color: #ffffff;
+  opacity: 0.9;
+  padding-right: 8px;
+  border-right: 1px solid rgba(180, 205, 245, 0.35);
+}
+
 .swatch {
   width: 12px;
   height: 3px;
