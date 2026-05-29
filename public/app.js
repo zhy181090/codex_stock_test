@@ -140,7 +140,6 @@ function resetViewport() {
 }
 
 function nodeBaseColor(node, metric) {
-  if (metric && metric.color) return metric.color;
   if (node.type === "target") return "#ffb347";
   return "#3ea3ff";
 }
@@ -430,10 +429,7 @@ function render() {
       g.appendChild(dot);
 
       const l1 = document.createElementNS("http://www.w3.org/2000/svg", "text");
-      l1.setAttribute(
-        "class",
-        `node-metric ${String(metric.weeklyReturnText || "").startsWith("-") ? "metric-down" : "metric-up"}`
-      );
+      l1.setAttribute("class", "node-metric metric-neutral");
       l1.setAttribute("x", "0");
       l1.setAttribute("y", "-40");
       l1.textContent = `周涨跌: ${metric.weeklyReturnText || "-"}`;

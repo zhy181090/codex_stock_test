@@ -270,6 +270,10 @@ button:disabled {
   fill: #63d881;
 }
 
+.metric-neutral {
+  fill: #dce9ff;
+}
+
 .metric-inflow {
   fill: #ffb660;
 }
