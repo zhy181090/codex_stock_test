@@ -17,7 +17,8 @@ const state = {
   cache: new Map(),
   pointers: new Map(),
   gesture: null,
-  nodeMetrics: {}
+  nodeMetrics: {},
+  expandedEdgeKey: ""
 };
 
 const ui = {
@@ -260,9 +261,30 @@ function forceLayout(iterations = 170) {
 }
 
 function relationLabel(edge) {
-  const depthText = edge.depth ? `L${edge.depth}` : "L?";
-  const sm = edge.summary ? ` | ${edge.summary}` : "";
-  return `${depthText} ${edge.relationCn}${sm}`;
+  const depthText = edge.depth ? `L${Math.max(1, Math.min(4, edge.depth))}` : "L1";
+  return depthText;
+}
+
+function edgeTypeColor(relationCn) {
+  const v = String(relationCn || "");
+  if (v.includes("刚需垄断")) return "#ff4d4f";
+  if (v.includes("技术壁垒")) return "#34c759";
+  if (v.includes("国产替代")) return "#ffcc00";
+  return "#3b82f6";
+}
+
+function edgeKey(edge) {
+  return `${edge.source}|${edge.target}|${edge.depth || ""}|${edge.relationCn || ""}|${edge.summary || ""}`;
+}
+
+function wrapTextByLen(text, maxLen = 18) {
+  const raw = String(text || "");
+  if (!raw) return [];
+  const lines = [];
+  for (let i = 0; i < raw.length; i += maxLen) {
+    lines.push(raw.slice(i, i + maxLen));
+  }
+  return lines;
 }
 
 function renderNews(news, commentary) {
@@ -307,16 +329,64 @@ function render() {
     path.setAttribute("d", `M ${sp.x} ${sp.y} Q ${mx + nx} ${my + ny} ${tp.x} ${tp.y}`);
     path.setAttribute("fill", "none");
     path.setAttribute("class", "edge");
+    path.setAttribute("stroke", edgeTypeColor(e.relationCn));
+    path.setAttribute("marker-end", `url(#arrow-${edgeTypeColor(e.relationCn).slice(1)})`);
     ui.edges.appendChild(path);
 
-    const angle = (Math.atan2(tp.y - sp.y, tp.x - sp.x) * 180) / Math.PI;
+    const lx = mx + nx * 0.5;
+    const ly = my + ny * 0.5;
+    const k = edgeKey(e);
+
+    const bg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    bg.setAttribute("class", "edge-level-bg");
+    bg.setAttribute("x", lx - 14);
+    bg.setAttribute("y", ly - 10);
+    bg.setAttribute("rx", "7");
+    bg.setAttribute("ry", "7");
+    bg.setAttribute("width", "28");
+    bg.setAttribute("height", "16");
+    ui.edgeLabels.appendChild(bg);
+
     const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
     label.setAttribute("class", "edge-label");
-    label.setAttribute("x", mx + nx * 0.6);
-    label.setAttribute("y", my + ny * 0.6 - 3);
-    label.setAttribute("transform", `rotate(${angle}, ${mx + nx * 0.6}, ${my + ny * 0.6 - 3})`);
+    label.setAttribute("x", lx);
+    label.setAttribute("y", ly + 2);
+    label.setAttribute("text-anchor", "middle");
     label.textContent = relationLabel(e);
+    label.addEventListener("click", (evt) => {
+      evt.stopPropagation();
+      state.expandedEdgeKey = state.expandedEdgeKey === k ? "" : k;
+      render();
+    });
     ui.edgeLabels.appendChild(label);
+
+    if (state.expandedEdgeKey === k) {
+      const detail = `${e.relationCn || "关系"}：${e.summary || "暂无详细说明"}`;
+      const lines = wrapTextByLen(detail, 18);
+      const boxW = 230;
+      const boxH = 10 + lines.length * 16;
+      const bx = lx + 16;
+      const by = ly + 8;
+
+      const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      rect.setAttribute("class", "edge-detail-box");
+      rect.setAttribute("x", bx);
+      rect.setAttribute("y", by);
+      rect.setAttribute("rx", "8");
+      rect.setAttribute("ry", "8");
+      rect.setAttribute("width", boxW);
+      rect.setAttribute("height", boxH);
+      ui.edgeLabels.appendChild(rect);
+
+      lines.forEach((line, idx) => {
+        const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        t.setAttribute("class", "edge-detail-text");
+        t.setAttribute("x", bx + 10);
+        t.setAttribute("y", by + 20 + idx * 16);
+        t.textContent = line;
+        ui.edgeLabels.appendChild(t);
+      });
+    }
   });
 
   for (const node of state.nodes.values()) {
@@ -383,6 +453,33 @@ function render() {
     ui.nodes.appendChild(g);
   }
   ui.backBtn.disabled = state.history.length === 0;
+}
+
+function ensureArrowDefs() {
+  if (!ui.svg) return;
+  const defs = ui.svg.querySelector("#lineDefs");
+  while (defs.firstChild) defs.removeChild(defs.firstChild);
+  const palette = [
+    { key: "ff4d4f", color: "#ff4d4f" },
+    { key: "34c759", color: "#34c759" },
+    { key: "ffcc00", color: "#ffcc00" },
+    { key: "3b82f6", color: "#3b82f6" }
+  ];
+  for (const p of palette) {
+    const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
+    marker.setAttribute("id", `arrow-${p.key}`);
+    marker.setAttribute("viewBox", "0 0 10 10");
+    marker.setAttribute("refX", "9");
+    marker.setAttribute("refY", "5");
+    marker.setAttribute("markerWidth", "6");
+    marker.setAttribute("markerHeight", "6");
+    marker.setAttribute("orient", "auto-start-reverse");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", "M 0 0 L 10 5 L 0 10 z");
+    path.setAttribute("fill", p.color);
+    marker.appendChild(path);
+    defs.appendChild(marker);
+  }
 }
 
 async function requestGraph(centerEntity) {
@@ -664,6 +761,7 @@ ui.centerEntity.addEventListener("keydown", (e) => {
 initWheelZoom();
 initMousePan();
 initTouchGestures();
+ensureArrowDefs();
 applyViewport();
 loadCache();
 

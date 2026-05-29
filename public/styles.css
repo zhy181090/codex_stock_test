@@ -122,6 +122,51 @@ button:disabled {
 .graph-wrap {
   min-width: 0;
   border-bottom: 1px solid rgba(130, 170, 230, 0.2);
+  position: relative;
+}
+
+.legend {
+  position: absolute;
+  left: 12px;
+  top: 10px;
+  z-index: 2;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  background: rgba(10, 18, 35, 0.75);
+  border: 1px solid rgba(120, 150, 210, 0.3);
+  border-radius: 10px;
+  padding: 6px 8px;
+}
+
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.swatch {
+  width: 12px;
+  height: 3px;
+  display: inline-block;
+  border-radius: 2px;
+}
+
+.swatch.red {
+  background: #ff4d4f;
+}
+
+.swatch.green {
+  background: #34c759;
+}
+
+.swatch.yellow {
+  background: #ffcc00;
+}
+
+.swatch.blue {
+  background: #3b82f6;
 }
 
 #graphSvg {
@@ -144,10 +189,29 @@ button:disabled {
 }
 
 .edge-label {
-  fill: #cae0ff;
+  fill: #e7f0ff;
   font-size: 10px;
-  pointer-events: none;
+  pointer-events: all;
   text-shadow: 0 0 5px rgba(8, 15, 30, 0.95);
+  cursor: pointer;
+}
+
+.edge-level-bg {
+  fill: rgba(10, 18, 35, 0.82);
+  stroke: rgba(180, 205, 245, 0.5);
+  stroke-width: 0.6;
+}
+
+.edge-detail-box {
+  fill: rgba(12, 22, 40, 0.95);
+  stroke: rgba(160, 190, 240, 0.6);
+  stroke-width: 1;
+}
+
+.edge-detail-text {
+  fill: #dce9ff;
+  font-size: 11px;
+  pointer-events: none;
 }
 
 .node circle {

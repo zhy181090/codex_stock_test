@@ -10,7 +10,7 @@
     <div class="app-shell">
       <aside class="panel">
         <h1>股票深层垄断关系图谱</h1>
-        <p class="hint">聚焦 2~4 级隐藏上游，输出刚需垄断/技术壁垒/国产替代/缺货催化四类关系。</p>
+        <p class="hint">关系线仅显示层级，点击 L1/L2/L3/L4 查看详细关系。</p>
 
         <label>模型提供商</label>
         <select id="modelName">
@@ -38,6 +38,12 @@
 
       <section class="content">
         <main class="graph-wrap">
+          <div class="legend" id="legend">
+            <span><i class="swatch red"></i>刚需垄断</span>
+            <span><i class="swatch green"></i>技术壁垒</span>
+            <span><i class="swatch yellow"></i>国产替代</span>
+            <span><i class="swatch blue"></i>缺货催化</span>
+          </div>
           <svg id="graphSvg" viewBox="0 0 1600 980">
             <defs id="lineDefs"></defs>
             <g id="viewport">
