@@ -484,10 +484,10 @@ function ensureArrowDefs() {
     const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
     marker.setAttribute("id", `arrow-${p.key}`);
     marker.setAttribute("viewBox", "0 0 10 10");
-    marker.setAttribute("refX", "9");
+    marker.setAttribute("refX", "9.5");
     marker.setAttribute("refY", "5");
-    marker.setAttribute("markerWidth", "6");
-    marker.setAttribute("markerHeight", "6");
+    marker.setAttribute("markerWidth", "8");
+    marker.setAttribute("markerHeight", "8");
     marker.setAttribute("orient", "auto-start-reverse");
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("d", "M 0 0 L 10 5 L 0 10 z");
