@@ -424,8 +424,8 @@ function render() {
     if (metric) {
       const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
       dot.setAttribute("r", "4");
-      dot.setAttribute("cx", "12");
-      dot.setAttribute("cy", "-12");
+      dot.setAttribute("cx", "14");
+      dot.setAttribute("cy", "-20");
       dot.setAttribute("class", metric.dataWeek === "last_week" ? "data-dot-last" : "data-dot-this");
       g.appendChild(dot);
 
@@ -435,7 +435,7 @@ function render() {
         `node-metric ${String(metric.weeklyReturnText || "").startsWith("-") ? "metric-down" : "metric-up"}`
       );
       l1.setAttribute("x", "0");
-      l1.setAttribute("y", "-28");
+      l1.setAttribute("y", "-40");
       l1.textContent = `周涨跌: ${metric.weeklyReturnText || "-"}`;
       g.appendChild(l1);
 
@@ -445,7 +445,7 @@ function render() {
         `node-metric ${Number(metric.mainFundNetInflow || 0) < 0 ? "metric-outflow" : "metric-inflow"}`
       );
       l2.setAttribute("x", "0");
-      l2.setAttribute("y", "-16");
+      l2.setAttribute("y", "-28");
       l2.textContent = `主力净流入: ${metric.mainFundText || "-"}`;
       g.appendChild(l2);
     }
