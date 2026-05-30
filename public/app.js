@@ -1,4 +1,4 @@
-const CACHE_KEY = "stock_graph_cache_v5";
+const CACHE_KEY = "stock_graph_cache_v6";
 const CONFIG_KEY = "stock_graph_config";
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 30;
@@ -25,6 +25,7 @@ const ui = {
   modelName: document.getElementById("modelName"),
   apiBaseUrl: document.getElementById("apiBaseUrl"),
   apiKey: document.getElementById("apiKey"),
+  tavilyApiKey: document.getElementById("tavilyApiKey"),
   centerEntity: document.getElementById("centerEntity"),
   buildBtn: document.getElementById("buildBtn"),
   backBtn: document.getElementById("backBtn"),
@@ -72,7 +73,8 @@ function saveConfig() {
     JSON.stringify({
       modelName: ui.modelName.value,
       apiBaseUrl: ui.apiBaseUrl.value.trim(),
-      apiKey: ui.apiKey.value.trim()
+      apiKey: ui.apiKey.value.trim(),
+      tavilyApiKey: ui.tavilyApiKey.value.trim()
     })
   );
 }
@@ -82,6 +84,7 @@ function loadConfigToForm(serverCfg) {
   ui.modelName.value = saved.modelName || serverCfg.defaultProvider || "deepseek";
   ui.apiBaseUrl.value = saved.apiBaseUrl || serverCfg.defaultApiBaseUrl || "https://api.deepseek.com/v1";
   ui.apiKey.value = saved.apiKey || "";
+  ui.tavilyApiKey.value = saved.tavilyApiKey || "";
   state.serverKeyConfigured = Boolean(serverCfg.serverKeyConfigured);
 }
 
@@ -549,6 +552,7 @@ async function requestEnrich(centerEntity, nodes) {
       modelName: ui.modelName.value,
       apiBaseUrl: ui.apiBaseUrl.value.trim(),
       apiKey: ui.apiKey.value.trim(),
+      tavilyApiKey: ui.tavilyApiKey.value.trim(),
       centerEntity,
       nodes,
       edges: state.edges

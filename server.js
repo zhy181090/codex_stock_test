@@ -6,6 +6,8 @@ const PORT = process.env.PORT || 3000;
 const DEFAULT_PROVIDER = process.env.DEFAULT_PROVIDER || "deepseek";
 const DEFAULT_API_BASE_URL = process.env.DEFAULT_API_BASE_URL || "https://api.deepseek.com/v1";
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || "";
+const TAVILY_API_KEY = process.env.TAVILY_API_KEY || "";
+const TAVILY_SEARCH_URL = process.env.TAVILY_SEARCH_URL || "https://api.tavily.com/search";
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -213,6 +215,18 @@ function formatMoneyCN(amount) {
   return amount.toFixed(0);
 }
 
+function beijingNowText() {
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).format(new Date());
+}
+
 function normalizeTicker(code) {
   const raw = String(code || "").trim().toUpperCase();
   if (!raw) return "";
@@ -322,6 +336,60 @@ async function fetchTickerEnrich(ticker) {
   return null;
 }
 
+async function tavilySearch(query, tavilyApiKey) {
+  const key = String(tavilyApiKey || TAVILY_API_KEY || "").trim();
+  if (!key) return null;
+  const body = {
+    query,
+    search_depth: "basic",
+    topic: "general",
+    max_results: 6,
+    include_answer: true,
+    include_raw_content: false
+  };
+  const data = await fetchJsonWithTimeout(
+    TAVILY_SEARCH_URL,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body)
+    },
+    16000
+  ).catch(() => null);
+  if (!data) return null;
+  return {
+    query,
+    answer: String(data.answer || ""),
+    results: Array.isArray(data.results)
+      ? data.results.slice(0, 6).map((r) => ({
+          title: String(r.title || ""),
+          url: String(r.url || ""),
+          content: String(r.content || "").slice(0, 700)
+        }))
+      : []
+  };
+}
+
+async function fetchTavilyContext(centerEntity, nodes, tavilyApiKey) {
+  const key = String(tavilyApiKey || TAVILY_API_KEY || "").trim();
+  if (!key) return [];
+  const names = (nodes || [])
+    .map((n) => n.label || n.id || n.ticker)
+    .filter(Boolean)
+    .slice(0, 12);
+  const tickers = (nodes || [])
+    .map((n) => n.ticker)
+    .filter(Boolean)
+    .slice(0, 12);
+  const q1 = `${centerEntity} ${names.join(" ")} 最近一周 涨跌幅 主力资金 资金流向`;
+  const q2 = `${centerEntity} ${tickers.join(" ")} weekly stock performance fund flow institutional flow`;
+  const results = await Promise.all([tavilySearch(q1, key), tavilySearch(q2, key)]);
+  return results.filter(Boolean);
+}
+
 async function fetchHalfYearAshare(ticker) {
   const secid = guessSecid(ticker);
   if (!secid) return null;
@@ -393,9 +461,9 @@ function metricColorClass(value) {
   return value > 0 ? "positive" : "negative";
 }
 
-async function fetchAIMetricsForAllNodes({ modelName, apiKey, apiBaseUrl, centerEntity, nodes, edges }) {
+async function fetchAIMetricsForAllNodes({ modelName, apiKey, apiBaseUrl, centerEntity, nodes, edges, searchContext }) {
   const cfg = getModelConfig(modelName, apiKey, apiBaseUrl);
-  const nowText = "北京时间 2026-05-30 21:00";
+  const nowText = `北京时间 ${beijingNowText()}`;
   const nodeLines = (nodes || [])
     .map((n) => `- id=${n.id || n.label}; label=${n.label || n.id}; ticker=${n.ticker || ""}; market=${n.market || ""}`)
     .join("\n");
@@ -408,10 +476,12 @@ async function fetchAIMetricsForAllNodes({ modelName, apiKey, apiBaseUrl, center
     "你是股票行情与资金面补全助手。",
     "返回严格 JSON，不要 markdown，不要解释。",
     "你需要为每个节点输出周涨跌幅和主力资金/资金动向估计。",
+    "若提供搜索资料，必须优先依据搜索资料；资料不足时再结合常识估算。",
     "如果节点是具体上市公司，按最近一周股价表现估计 weeklyReturnPct；若无法确定精确数值，给合理近似并标记 source='ai_estimate'。",
     "如果节点是行业、板块、材料、设备或非上市主体，输出该行业/板块/细分赛道平均周涨跌与资金动向估计。",
     "mainFundNetInflow 单位为人民币元；海外公司或无主力资金口径时，可用机构资金/资金流向估计，正为流入，负为流出，0为中性。",
     "所有节点都必须输出，不允许缺失。",
+    "source 只能是 market_source / tavily_search / ai_estimate / fallback。若主要依据搜索资料，source='tavily_search'。",
     "格式：",
     "{",
     '  "items":[{"id":"英伟达","weeklyReturnPct":1.2,"mainFundNetInflow":350000000,"source":"ai_estimate","note":"周涨跌和机构资金估计"}]',
@@ -425,6 +495,8 @@ async function fetchAIMetricsForAllNodes({ modelName, apiKey, apiBaseUrl, center
     nodeLines || "无",
     "关系:",
     edgeLines || "无",
+    "搜索资料:",
+    JSON.stringify(searchContext || []).slice(0, 9000),
     "请为每个节点生成指标。"
   ].join("\n");
 
@@ -607,26 +679,21 @@ async function buildHalfYearAndScoreAnalysis({
   };
 }
 
-async function buildEnrichPayload({ modelName, apiKey, apiBaseUrl, centerEntity, nodes, edges }) {
-  const [tickerMetrics, aiMetrics, news] = await Promise.all([
-    fetchWeeklyAndFundData(nodes),
-    fetchAIMetricsForAllNodes({ modelName, apiKey, apiBaseUrl, centerEntity, nodes, edges }),
-    fetchNews(centerEntity)
+async function buildEnrichPayload({ modelName, apiKey, apiBaseUrl, tavilyApiKey, centerEntity, nodes, edges }) {
+  const [news, searchContext] = await Promise.all([
+    fetchNews(centerEntity),
+    fetchTavilyContext(centerEntity, nodes, tavilyApiKey)
   ]);
+  const aiMetrics = await fetchAIMetricsForAllNodes({
+    modelName,
+    apiKey,
+    apiBaseUrl,
+    centerEntity,
+    nodes,
+    edges,
+    searchContext
+  });
   const nodeMetrics = { ...aiMetrics };
-  for (const node of nodes || []) {
-    const id = String(node.id || node.label || "").trim();
-    const ticker = normalizeTicker(node.ticker);
-    if (!id || !ticker || !tickerMetrics[ticker]) continue;
-    const m = tickerMetrics[ticker];
-    nodeMetrics[id] = {
-      ...nodeMetrics[id],
-      ...m,
-      weeklyClass: metricColorClass(m.weeklyReturnPct),
-      fundClass: metricColorClass(m.mainFundNetInflow),
-      source: "market_source"
-    };
-  }
   const centerTicker = resolveCenterTicker(centerEntity, nodes);
   const halfYearInfo = centerTicker ? await fetchHalfYearReturn(centerTicker).catch(() => null) : null;
   const thesis = await buildHalfYearAndScoreAnalysis({
@@ -723,6 +790,7 @@ const server = http.createServer(async (req, res) => {
         modelName: body.modelName,
         apiKey: body.apiKey,
         apiBaseUrl: body.apiBaseUrl,
+        tavilyApiKey: body.tavilyApiKey,
         centerEntity,
         nodes,
         edges
