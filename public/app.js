@@ -166,7 +166,7 @@ function setGraph(centerEntity, graph, metrics) {
     state.nodes.set(id, {
       id,
       label: node.label || id,
-      type: node.type || "company",
+      type: id === centerEntity || node.label === centerEntity ? "target" : "company",
       ticker: (node.ticker || "").toUpperCase(),
       market: node.market || ""
     });
@@ -210,6 +210,10 @@ function forceLayout(iterations = 170) {
 
   for (const node of nodes) {
     if (!state.positions.has(node.id)) {
+      if (node.id === state.currentCenter || node.label === state.currentCenter) {
+        state.positions.set(node.id, { x: width / 2, y: height / 2 });
+        continue;
+      }
       const rx = hashNumber(`${state.currentCenter}:${node.id}:x`);
       const ry = hashNumber(`${state.currentCenter}:${node.id}:y`);
       state.positions.set(node.id, { x: 120 + rx * 1360, y: 90 + ry * 800 });
@@ -257,6 +261,11 @@ function forceLayout(iterations = 170) {
     const temp = Math.max(1, 42 * (1 - step / iterations));
     for (const n of nodes) {
       const p = state.positions.get(n.id);
+      if (n.id === state.currentCenter || n.label === state.currentCenter) {
+        p.x = width / 2;
+        p.y = height / 2;
+        continue;
+      }
       const d = disp.get(n.id);
       const dist = Math.hypot(d.x, d.y) || 0.01;
       p.x += (d.x / dist) * Math.min(dist, temp);
