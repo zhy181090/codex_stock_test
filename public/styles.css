@@ -281,6 +281,14 @@ button:disabled {
   fill: #dce9ff;
 }
 
+.metric-positive {
+  fill: #ff7070;
+}
+
+.metric-negative {
+  fill: #63d881;
+}
+
 .metric-inflow {
   fill: #ffb660;
 }

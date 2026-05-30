@@ -1,4 +1,4 @@
-const CACHE_KEY = "stock_graph_cache_v4";
+const CACHE_KEY = "stock_graph_cache_v5";
 const CONFIG_KEY = "stock_graph_config";
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 30;
@@ -446,7 +446,7 @@ function render() {
   for (const node of state.nodes.values()) {
     const p = state.positions.get(node.id);
     if (!p) continue;
-    const metric = state.nodeMetrics[node.ticker] || null;
+    const metric = state.nodeMetrics[node.id] || state.nodeMetrics[node.label] || state.nodeMetrics[node.ticker] || null;
 
     const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
     g.setAttribute(
@@ -467,24 +467,22 @@ function render() {
     title.textContent = node.label.length > 16 ? `${node.label.slice(0, 16)}...` : node.label;
     g.appendChild(title);
 
-    if (metric) {
-      const l1 = document.createElementNS("http://www.w3.org/2000/svg", "text");
-      l1.setAttribute("class", "node-metric metric-neutral");
-      l1.setAttribute("x", "0");
-      l1.setAttribute("y", "-40");
-      l1.textContent = `周涨跌: ${metric.weeklyReturnText || "-"}`;
-      g.appendChild(l1);
+    const weeklyClass = metric?.weeklyClass || "neutral";
+    const fundClass = metric?.fundClass || "neutral";
 
-      const l2 = document.createElementNS("http://www.w3.org/2000/svg", "text");
-      l2.setAttribute(
-        "class",
-        `node-metric ${Number(metric.mainFundNetInflow || 0) < 0 ? "metric-outflow" : "metric-inflow"}`
-      );
-      l2.setAttribute("x", "0");
-      l2.setAttribute("y", "-28");
-      l2.textContent = `主力净流入: ${metric.mainFundText || "-"}`;
-      g.appendChild(l2);
-    }
+    const l1 = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    l1.setAttribute("class", `node-metric metric-${weeklyClass}`);
+    l1.setAttribute("x", "0");
+    l1.setAttribute("y", "-40");
+    l1.textContent = `周涨跌: ${metric?.weeklyReturnText || "0.00%"}`;
+    g.appendChild(l1);
+
+    const l2 = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    l2.setAttribute("class", `node-metric metric-${fundClass}`);
+    l2.setAttribute("x", "0");
+    l2.setAttribute("y", "-28");
+    l2.textContent = `主力净流入: ${metric?.mainFundText || "0"}`;
+    g.appendChild(l2);
 
     g.addEventListener("click", async (evt) => {
       evt.stopPropagation();

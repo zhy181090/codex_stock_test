@@ -388,6 +388,87 @@ async function fetchWeeklyAndFundData(nodes) {
   return out;
 }
 
+function metricColorClass(value) {
+  if (!Number.isFinite(value) || value === 0) return "neutral";
+  return value > 0 ? "positive" : "negative";
+}
+
+async function fetchAIMetricsForAllNodes({ modelName, apiKey, apiBaseUrl, centerEntity, nodes, edges }) {
+  const cfg = getModelConfig(modelName, apiKey, apiBaseUrl);
+  const nowText = "北京时间 2026-05-30 21:00";
+  const nodeLines = (nodes || [])
+    .map((n) => `- id=${n.id || n.label}; label=${n.label || n.id}; ticker=${n.ticker || ""}; market=${n.market || ""}`)
+    .join("\n");
+  const edgeLines = (edges || [])
+    .slice(0, 30)
+    .map((e) => `- ${e.source} -> ${e.target}: ${e.relationCn || ""} ${e.summary || ""}`)
+    .join("\n");
+
+  const systemPrompt = [
+    "你是股票行情与资金面补全助手。",
+    "返回严格 JSON，不要 markdown，不要解释。",
+    "你需要为每个节点输出周涨跌幅和主力资金/资金动向估计。",
+    "如果节点是具体上市公司，按最近一周股价表现估计 weeklyReturnPct；若无法确定精确数值，给合理近似并标记 source='ai_estimate'。",
+    "如果节点是行业、板块、材料、设备或非上市主体，输出该行业/板块/细分赛道平均周涨跌与资金动向估计。",
+    "mainFundNetInflow 单位为人民币元；海外公司或无主力资金口径时，可用机构资金/资金流向估计，正为流入，负为流出，0为中性。",
+    "所有节点都必须输出，不允许缺失。",
+    "格式：",
+    "{",
+    '  "items":[{"id":"英伟达","weeklyReturnPct":1.2,"mainFundNetInflow":350000000,"source":"ai_estimate","note":"周涨跌和机构资金估计"}]',
+    "}"
+  ].join("\n");
+
+  const userPrompt = [
+    `校对时间: ${nowText}`,
+    `当前中心: ${centerEntity}`,
+    "节点:",
+    nodeLines || "无",
+    "关系:",
+    edgeLines || "无",
+    "请为每个节点生成指标。"
+  ].join("\n");
+
+  const parsed = await deepseekChatJSON(cfg, systemPrompt, userPrompt, 0.15).catch(() => null);
+  const out = {};
+  const items = Array.isArray(parsed?.items) ? parsed.items : [];
+  for (const item of items) {
+    const id = String(item.id || item.label || "").trim();
+    if (!id) continue;
+    const weeklyReturnPct = Number(item.weeklyReturnPct);
+    const mainFundNetInflow = Number(item.mainFundNetInflow);
+    out[id] = {
+      weeklyReturnPct: Number.isFinite(weeklyReturnPct) ? weeklyReturnPct : 0,
+      mainFundNetInflow: Number.isFinite(mainFundNetInflow) ? mainFundNetInflow : 0,
+      dataWeek: "this_week",
+      weeklyReturnText: Number.isFinite(weeklyReturnPct)
+        ? `${weeklyReturnPct > 0 ? "+" : ""}${weeklyReturnPct.toFixed(2)}%`
+        : "0.00%",
+      mainFundText: formatMoneyCN(Number.isFinite(mainFundNetInflow) ? mainFundNetInflow : 0),
+      weeklyClass: metricColorClass(weeklyReturnPct),
+      fundClass: metricColorClass(mainFundNetInflow),
+      source: String(item.source || "ai_estimate"),
+      note: String(item.note || "")
+    };
+  }
+
+  for (const n of nodes || []) {
+    const id = String(n.id || n.label || "").trim();
+    if (!id || out[id]) continue;
+    out[id] = {
+      weeklyReturnPct: 0,
+      mainFundNetInflow: 0,
+      dataWeek: "this_week",
+      weeklyReturnText: "0.00%",
+      mainFundText: "0",
+      weeklyClass: "neutral",
+      fundClass: "neutral",
+      source: "fallback",
+      note: "模型未返回，按中性处理"
+    };
+  }
+  return out;
+}
+
 function resolveCenterTicker(centerEntity, nodes) {
   const c = String(centerEntity || "").trim().toLowerCase();
   const arr = Array.isArray(nodes) ? nodes : [];
@@ -527,7 +608,25 @@ async function buildHalfYearAndScoreAnalysis({
 }
 
 async function buildEnrichPayload({ modelName, apiKey, apiBaseUrl, centerEntity, nodes, edges }) {
-  const [nodeMetrics, news] = await Promise.all([fetchWeeklyAndFundData(nodes), fetchNews(centerEntity)]);
+  const [tickerMetrics, aiMetrics, news] = await Promise.all([
+    fetchWeeklyAndFundData(nodes),
+    fetchAIMetricsForAllNodes({ modelName, apiKey, apiBaseUrl, centerEntity, nodes, edges }),
+    fetchNews(centerEntity)
+  ]);
+  const nodeMetrics = { ...aiMetrics };
+  for (const node of nodes || []) {
+    const id = String(node.id || node.label || "").trim();
+    const ticker = normalizeTicker(node.ticker);
+    if (!id || !ticker || !tickerMetrics[ticker]) continue;
+    const m = tickerMetrics[ticker];
+    nodeMetrics[id] = {
+      ...nodeMetrics[id],
+      ...m,
+      weeklyClass: metricColorClass(m.weeklyReturnPct),
+      fundClass: metricColorClass(m.mainFundNetInflow),
+      source: "market_source"
+    };
+  }
   const centerTicker = resolveCenterTicker(centerEntity, nodes);
   const halfYearInfo = centerTicker ? await fetchHalfYearReturn(centerTicker).catch(() => null) : null;
   const thesis = await buildHalfYearAndScoreAnalysis({
